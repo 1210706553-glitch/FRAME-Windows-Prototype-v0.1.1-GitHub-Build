@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build-windows:
-    name: Windows NSIS and MSI
+    name: Windows NSIS EXE
     runs-on: windows-latest
     timeout-minutes: 45
 
@@ -47,11 +47,4 @@ jobs:
         with:
           name: FRAME-Windows-EXE
           path: src-tauri/target/release/bundle/nsis/*.exe
-          if-no-files-found: error
-
-      - name: Upload MSI installer
-        uses: actions/upload-artifact@v4
-        with:
-          name: FRAME-Windows-MSI
-          path: src-tauri/target/release/bundle/msi/*.msi
           if-no-files-found: error

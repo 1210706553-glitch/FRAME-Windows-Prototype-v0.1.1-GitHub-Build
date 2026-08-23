@@ -58,7 +58,7 @@ npm run dev
 powershell -ExecutionPolicy Bypass -File .\scripts\build-windows.ps1
 ```
 
-成功后，NSIS 与 MSI 安装包会出现在 `src-tauri\target\release\bundle` 下。
+成功后，NSIS 安装包会出现在 `src-tauri\target\release\bundle\nsis` 下。
 
 也可以把整个项目上传至 GitHub 私有仓库。仓库内置的 `Build Windows Installer` 工作流会在首次上传后自动运行，也可以在仓库的 **Actions** 页面手动选择 **Run workflow**。完成后从该次任务的 **Artifacts** 下载 `FRAME-Windows-EXE`。
 
