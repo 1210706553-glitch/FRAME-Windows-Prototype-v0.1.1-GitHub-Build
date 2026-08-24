@@ -40,6 +40,8 @@ import {
   replanIncompleteTasks,
 } from "./lib/planner";
 import { configureReminderRuntime, sendNativeReminder, type ReminderRuntimeStatus } from "./lib/native-reminders";
+import { shouldRunAppGuard } from "./lib/app-guard-policy";
+import { readNativeAppGuard, syncNativeAppGuard, type AppGuardRuntimeStatus } from "./lib/native-app-guard";
 import { evaluateReminder, type ReminderDecision } from "./lib/reminders";
 import {
   CREATION_STAGES,
@@ -134,6 +136,7 @@ function App() {
   const [currentDateKey, setCurrentDateKey] = useState(todayKey);
   const [reminderToast, setReminderToast] = useState<(ReminderDecision & { native: boolean }) | null>(null);
   const [reminderRuntime, setReminderRuntime] = useState<ReminderRuntimeStatus | null>(null);
+  const [appGuardRuntime, setAppGuardRuntime] = useState<AppGuardRuntimeStatus | null>(null);
 
   const project = state.project;
   const tasks = project?.tasks ?? [];
@@ -163,6 +166,28 @@ function App() {
       .then(setReminderRuntime)
       .catch(() => setReminderRuntime({ native: true, permissionGranted: false, launchAtStartup: false }));
   }, [project, state.preferences.reminderEnabled, state.preferences.launchAtStartup]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const active = Boolean(project) && shouldRunAppGuard(state.focus.status);
+    const resumeAfterSeconds = state.focus.status === "temporary-unlock" && state.focus.unlockUntil
+      ? Math.max(1, Math.ceil((new Date(state.focus.unlockUntil).getTime() - Date.now()) / 1_000))
+      : undefined;
+    void syncNativeAppGuard(active, state.preferences.distractionApps, resumeAfterSeconds).then((runtime) => {
+      if (!cancelled) setAppGuardRuntime(runtime);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [project, state.focus.status, state.focus.unlockUntil, state.preferences.distractionApps]);
+
+  useEffect(() => {
+    if (!appGuardRuntime?.native || !appGuardRuntime.active) return;
+    const timer = window.setInterval(() => {
+      void readNativeAppGuard(state.preferences.distractionApps.length).then(setAppGuardRuntime);
+    }, 2_000);
+    return () => window.clearInterval(timer);
+  }, [appGuardRuntime?.native, appGuardRuntime?.active, state.preferences.distractionApps.length]);
 
   useEffect(() => {
     if (!project) return;
@@ -376,6 +401,15 @@ function App() {
     setReminderToast((current) => current?.key === decision.key ? { ...current, native } : current);
   }
 
+  async function testAppGuard(apps: string[]) {
+    if (!apps.length || !window.confirm("测试会立即关闭名单中正在运行的程序，并在5秒后停止保护。确定继续吗？")) return;
+    const started = await syncNativeAppGuard(true, apps);
+    setAppGuardRuntime(started);
+    window.setTimeout(() => {
+      void syncNativeAppGuard(false, apps).then(setAppGuardRuntime);
+    }, 5_000);
+  }
+
   if (!project) return <Onboarding onCreate={(createdProject, preferences) => setState({ schemaVersion: 3, project: createdProject, preferences, focus: { status: "idle" }, records: [] })} />;
 
   return (
@@ -402,9 +436,9 @@ function App() {
         </section>
 
         <div className="sidebar-bottom">
-          <div className={`guard-state ${state.focus.status !== "idle" ? "on" : ""}`}>
+          <div className={`guard-state ${appGuardRuntime?.active ? "on" : ""}`}>
             <ShieldCheck size={17} />
-            <div><strong>{state.focus.status !== "idle" ? "专注保护进行中" : "专注保护待命"}</strong><span>{state.preferences.distractionApps.length + state.preferences.distractionSites.length}项干扰源</span></div>
+            <div><strong>{!appGuardRuntime ? "正在检查程序保护" : !appGuardRuntime.native ? "程序保护未接通" : appGuardRuntime.error ? "程序保护不可用" : appGuardRuntime.active ? "程序保护进行中" : "程序保护待命"}</strong><span>{appGuardRuntime?.active ? `${appGuardRuntime.appCount}个程序 · 已拦截${appGuardRuntime.blockedAttempts}次` : `${state.preferences.distractionApps.length}个程序已配置`}</span></div>
           </div>
           <button className="nav-settings" onClick={() => setSettingsOpen(true)}><Settings size={17} /><span>计划与软件设置</span></button>
         </div>
@@ -453,7 +487,7 @@ function App() {
         {view === "review" && <ReviewView records={state.records} tasks={tasks} todayKey={currentDateKey} />}
       </main>
 
-      {settingsOpen && <SettingsModal state={state} setState={setState} reminderRuntime={reminderRuntime} onTestReminder={sendTestReminder} onClose={() => setSettingsOpen(false)} onReset={resetProject} />}
+      {settingsOpen && <SettingsModal state={state} setState={setState} reminderRuntime={reminderRuntime} appGuardRuntime={appGuardRuntime} onTestReminder={sendTestReminder} onTestAppGuard={testAppGuard} onClose={() => setSettingsOpen(false)} onReset={resetProject} />}
       {unavailableOpen && <ReasonModal title="今天确实无法制作？" description="写下真实原因。每周第一次会使用动态休息日；之后会记录缺勤并把任务顺延。" reason={reason} setReason={setReason} confirm="确认并重新排期" onConfirm={submitUnavailable} onClose={() => { setUnavailableOpen(false); setReason(""); }} />}
       {unlockOpen && <ReasonModal title="临时解锁15分钟" description="写下你现在必须离开专注模式的原因。15分钟后会自动恢复。" reason={reason} setReason={setReason} confirm="开始临时解锁" onConfirm={grantTemporaryUnlock} onClose={() => { setUnlockOpen(false); setReason(""); }} />}
       {reminderToast && <button className="reminder-toast" onClick={() => { setView("today"); setReminderToast(null); }}><BellRing size={19} /><span><strong>{reminderToast.title}</strong><small>{reminderToast.body}</small></span><em>{reminderToast.native ? "Windows已提醒" : "软件内提醒"}</em></button>}
@@ -570,14 +604,14 @@ function Onboarding({ onCreate }: { onCreate: (project: ProjectPlan, preferences
   return <main className="onboarding"><section className="onboarding-card"><div className="onboarding-visual"><img src="/mickey-toolkit-icon.png" alt="" /><span className="eyebrow">WELCOME</span><h1>张诗语の<br/>米奇妙妙工具</h1><p>它不替你做视频，只把每天该做的事情摆在眼前，并陪你按时做完。</p><ul><li><Check size={15} />每天只安排2～5项</li><li><Check size={15} />清楚显示还差多少</li><li><Check size={15} />开始后进入专注状态</li></ul></div><form onSubmit={(event) => { event.preventDefault(); submit(); }}><header><span>第一次设置</span><h2>先建立你的当前项目</h2><p>每个人填写自己的时间，只保存在当前电脑。</p></header><div className="form-grid"><label><span>怎么称呼你</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="可不填" /></label><label><span>项目名称 *</span><input autoFocus required value={projectName} onChange={(event) => setProjectName(event.target.value)} placeholder="例如：Low-Budget Repairs" /></label><label><span>游戏或素材来源</span><input value={game} onChange={(event) => setGame(event.target.value)} placeholder="例如：Low-Budget Repairs" /></label><label><span>主要发布平台</span><select value={platform} onChange={(event) => setPlatform(event.target.value as ProjectPlan["primaryPlatform"])}><option>B站</option><option>抖音</option><option>小红书</option><option>快手</option><option>其他</option></select></label><label><span>每天几点开始</span><input type="time" value={startTime} onChange={(event) => setStartTime(event.target.value)} /></label><label><span>每天计划投入</span><select value={dailyMinutes} onChange={(event) => setDailyMinutes(Number(event.target.value))}><option value={120}>2小时</option><option value={150}>2.5小时</option><option value={180}>3小时</option></select></label><label><span>每周休息安排</span><select value={restWeekday} onChange={(event) => setRestWeekday(Number(event.target.value))}><option value={-1}>动态休息（推荐）</option>{weekdays.map((day, index) => <option key={day} value={index}>固定{day}</option>)}</select></label><label><span>目标发布日期</span><input type="date" min={todayKey} value={targetDate} onChange={(event) => setTargetDate(event.target.value)} /></label></div><button className="button primary onboarding-submit" disabled={!projectName.trim()} type="submit">生成第一份每日计划<ArrowRight size={17} /></button></form></section></main>;
 }
 
-function SettingsModal({ state, setState, reminderRuntime, onTestReminder, onClose, onReset }: { state: AppState; setState: React.Dispatch<React.SetStateAction<AppState>>; reminderRuntime: ReminderRuntimeStatus | null; onTestReminder: () => void; onClose: () => void; onReset: () => void }) {
+function SettingsModal({ state, setState, reminderRuntime, appGuardRuntime, onTestReminder, onTestAppGuard, onClose, onReset }: { state: AppState; setState: React.Dispatch<React.SetStateAction<AppState>>; reminderRuntime: ReminderRuntimeStatus | null; appGuardRuntime: AppGuardRuntimeStatus | null; onTestReminder: () => void; onTestAppGuard: (apps: string[]) => void; onClose: () => void; onReset: () => void }) {
   const [draft, setDraft] = useState(state.preferences);
   const [targetDate, setTargetDate] = useState(state.project?.targetDate ?? todayKey);
   function save() {
     setState((current) => ({ ...current, preferences: draft, project: current.project ? { ...current.project, targetDate } : null }));
     onClose();
   }
-  return <div className="modal-backdrop" onMouseDown={onClose}><section className="modal settings-modal" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><header><div><span>PERSONAL SETTINGS</span><h2>计划与软件设置</h2></div><button aria-label="关闭" onClick={onClose}><X size={18} /></button></header><div className="settings-sections"><section><h3>每日节奏</h3><div className="form-grid"><label><span>称呼</span><input value={draft.displayName} onChange={(event) => setDraft({ ...draft, displayName: event.target.value })} /></label><label><span>开始时间</span><input type="time" value={draft.dailyStartTime} onChange={(event) => setDraft({ ...draft, dailyStartTime: event.target.value })} /></label><label><span>每日投入</span><select value={draft.dailyMinutes} onChange={(event) => setDraft({ ...draft, dailyMinutes: Number(event.target.value) })}><option value={120}>2小时</option><option value={150}>2.5小时</option><option value={180}>3小时</option></select></label><label><span>每周休息安排</span><select value={draft.restWeekday} onChange={(event) => setDraft({ ...draft, restWeekday: Number(event.target.value) })}><option value={-1}>动态休息（推荐）</option>{weekdays.map((day, index) => <option key={day} value={index}>固定{day}</option>)}</select></label><label><span>目标发布日期</span><input type="date" value={targetDate} onChange={(event) => setTargetDate(event.target.value)} /></label></div></section><section><h3>督促提醒</h3><label className="toggle-row"><input type="checkbox" checked={draft.reminderEnabled} onChange={(event) => setDraft({ ...draft, reminderEnabled: event.target.checked })} /><span><BellRing size={17} /><strong>每天按设置时间督促</strong><small>到点、15分钟未开始、之后每30分钟</small></span><i /></label><label className={`toggle-row ${!draft.reminderEnabled ? "disabled" : ""}`}><input type="checkbox" disabled={!draft.reminderEnabled} checked={draft.launchAtStartup} onChange={(event) => setDraft({ ...draft, launchAtStartup: event.target.checked })} /><span><Power size={17} /><strong>开机后在后台待命</strong><small>关闭窗口后仍保留在系统托盘</small></span><i /></label><div className={`runtime-state ${reminderRuntime?.native && reminderRuntime.permissionGranted ? "ready" : "warning"}`}><CircleDot size={14} /><span>{!reminderRuntime ? "保存后检查Windows提醒状态" : !reminderRuntime.native ? "浏览器预览不发送Windows通知" : reminderRuntime.permissionGranted ? `Windows通知已就绪${reminderRuntime.launchAtStartup ? " · 开机自启已开启" : ""}` : "Windows通知权限未开启，请在系统设置中允许"}</span></div><button className="test-reminder" disabled={!draft.reminderEnabled} onClick={onTestReminder}><BellRing size={14} />发送一条测试提醒</button><h3 className="settings-subheading">干扰名单</h3><label className="wide-label"><span>应用进程名，用逗号分隔</span><textarea value={draft.distractionApps.join(", ")} onChange={(event) => setDraft({ ...draft, distractionApps: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} /></label><label className="wide-label"><span>网站域名，用逗号分隔</span><textarea value={draft.distractionSites.join(", ")} onChange={(event) => setDraft({ ...draft, distractionSites: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} /></label><p className="settings-note"><ShieldCheck size={15} />名单已经保存；系统级阻止会在Windows原生切片中接通。</p></section></div><footer><button className="danger-link" onClick={onReset}>结束并重设当前项目</button><div><button className="button secondary" onClick={onClose}>取消</button><button className="button primary" onClick={save}>保存设置</button></div></footer></section></div>;
+  return <div className="modal-backdrop" onMouseDown={onClose}><section className="modal settings-modal" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><header><div><span>PERSONAL SETTINGS</span><h2>计划与软件设置</h2></div><button aria-label="关闭" onClick={onClose}><X size={18} /></button></header><div className="settings-sections"><section><h3>每日节奏</h3><div className="form-grid"><label><span>称呼</span><input value={draft.displayName} onChange={(event) => setDraft({ ...draft, displayName: event.target.value })} /></label><label><span>开始时间</span><input type="time" value={draft.dailyStartTime} onChange={(event) => setDraft({ ...draft, dailyStartTime: event.target.value })} /></label><label><span>每日投入</span><select value={draft.dailyMinutes} onChange={(event) => setDraft({ ...draft, dailyMinutes: Number(event.target.value) })}><option value={120}>2小时</option><option value={150}>2.5小时</option><option value={180}>3小时</option></select></label><label><span>每周休息安排</span><select value={draft.restWeekday} onChange={(event) => setDraft({ ...draft, restWeekday: Number(event.target.value) })}><option value={-1}>动态休息（推荐）</option>{weekdays.map((day, index) => <option key={day} value={index}>固定{day}</option>)}</select></label><label><span>目标发布日期</span><input type="date" value={targetDate} onChange={(event) => setTargetDate(event.target.value)} /></label></div></section><section><h3>督促提醒</h3><label className="toggle-row"><input type="checkbox" checked={draft.reminderEnabled} onChange={(event) => setDraft({ ...draft, reminderEnabled: event.target.checked })} /><span><BellRing size={17} /><strong>每天按设置时间督促</strong><small>到点、15分钟未开始、之后每30分钟</small></span><i /></label><label className={`toggle-row ${!draft.reminderEnabled ? "disabled" : ""}`}><input type="checkbox" disabled={!draft.reminderEnabled} checked={draft.launchAtStartup} onChange={(event) => setDraft({ ...draft, launchAtStartup: event.target.checked })} /><span><Power size={17} /><strong>开机后在后台待命</strong><small>关闭窗口后仍保留在系统托盘</small></span><i /></label><div className={`runtime-state ${reminderRuntime?.native && reminderRuntime.permissionGranted ? "ready" : "warning"}`}><CircleDot size={14} /><span>{!reminderRuntime ? "保存后检查Windows提醒状态" : !reminderRuntime.native ? "浏览器预览不发送Windows通知" : reminderRuntime.permissionGranted ? `Windows通知已就绪${reminderRuntime.launchAtStartup ? " · 开机自启已开启" : ""}` : "Windows通知权限未开启，请在系统设置中允许"}</span></div><button className="test-reminder" disabled={!draft.reminderEnabled} onClick={onTestReminder}><BellRing size={14} />发送一条测试提醒</button><h3 className="settings-subheading">应用程序限制</h3><label className="wide-label"><span>进程名，用逗号分隔，例如 steam.exe、dota2.exe</span><textarea value={draft.distractionApps.join(", ")} onChange={(event) => setDraft({ ...draft, distractionApps: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} /></label><div className={`runtime-state ${appGuardRuntime?.native && !appGuardRuntime.error ? "ready" : "warning"}`}><ShieldCheck size={15} /><span>{!appGuardRuntime ? "保存后检查程序保护状态" : !appGuardRuntime.native ? "浏览器预览未接通程序限制" : appGuardRuntime.error ? `程序保护不可用：${appGuardRuntime.error}` : appGuardRuntime.active ? `程序保护运行中 · 已拦截${appGuardRuntime.blockedAttempts}次` : "程序保护已接通，开始专注后自动启用"}</span></div><button className="test-reminder" disabled={!draft.distractionApps.length || appGuardRuntime?.active} onClick={() => onTestAppGuard(draft.distractionApps)}><ShieldCheck size={14} />测试程序限制5秒</button><h3 className="settings-subheading">网站名单（尚未接通）</h3><label className="wide-label"><span>域名只会保存，当前版本不会修改网络</span><textarea value={draft.distractionSites.join(", ")} onChange={(event) => setDraft({ ...draft, distractionSites: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} /></label><p className="settings-note"><ShieldCheck size={15} />临时解锁、结束专注或退出软件后，程序限制立即停止，不会遗留系统修改。</p></section></div><footer><button className="danger-link" onClick={onReset}>结束并重设当前项目</button><div><button className="button secondary" onClick={onClose}>取消</button><button className="button primary" onClick={save}>保存设置</button></div></footer></section></div>;
 }
 
 function ReasonModal({ title, description, reason, setReason, confirm, onConfirm, onClose }: { title: string; description: string; reason: string; setReason: (value: string) => void; confirm: string; onConfirm: () => void; onClose: () => void }) {

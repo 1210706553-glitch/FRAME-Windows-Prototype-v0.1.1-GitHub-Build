@@ -65,3 +65,34 @@
 ## Open Questions
 
 - Windows 网站阻止采用 hosts 还是本地代理，在 Task 8 前通过真实机器测试再决定。
+
+## v0.4 Application Guard Plan
+
+### Architecture decisions
+
+- 本切片只限制 Windows 程序，不修改 `hosts`、防火墙或浏览器设置。
+- Rust 后台监视器只在专注状态为 `active` 时运行；临时解锁、完成、休息和退出立即停止。
+- 通过进程映像名调用 Windows `taskkill`，不启动 shell、不请求管理员权限，并拒绝系统关键进程名。
+- 拦截状态不写入系统；程序异常退出后不会留下持久修改。前端重启时根据本地专注状态重新同步。
+
+### Task list
+
+- [x] Task 8.1: 建立进程名规范化、关键进程保护和 Rust 后台监视器
+- [x] Task 8.2: 暴露启动、停止、状态查询三个窄 Tauri 命令
+- [x] Task 8.3: 前端根据专注、临时解锁和结束状态自动同步原生保护
+- [x] Task 8.4: 将界面改为真实显示“未接通、待命、进行中”和拦截次数
+- [ ] Task 8.5: 完成前端测试、构建检查和 GitHub Windows 构建包
+
+### Acceptance criteria
+
+- [ ] 开始专注后，名单中的普通用户程序会被关闭，重新启动后会再次被关闭
+- [ ] 临时解锁15分钟期间不拦截，到期自动恢复
+- [ ] 正常结束、休息、彻底退出或崩溃后没有持久系统修改
+- [ ] 系统关键进程和本软件自身不能加入拦截名单
+- [ ] 网站名单明确显示为尚未接通，不伪装成已保护
+
+### Checkpoint
+
+- [x] 前端 lint、TypeScript、Vitest、Vite build 全部通过
+- [ ] GitHub Actions Windows NSIS 构建通过
+- [ ] Windows 真机用一个无风险测试程序验证启动、重开、解锁和结束

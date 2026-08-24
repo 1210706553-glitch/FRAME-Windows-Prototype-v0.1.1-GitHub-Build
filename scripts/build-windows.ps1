@@ -15,8 +15,9 @@ Write-Host "[FRAME] Running tests and frontend checks..."
 npm run test
 npm run lint
 npm run build
+cargo test --manifest-path src-tauri\Cargo.toml
 
-Write-Host "[FRAME] Building NSIS and MSI installers..."
+Write-Host "[FRAME] Building the NSIS installer..."
 npm run desktop:build
 
 Write-Host "[FRAME] Finished. See src-tauri\target\release\bundle"

@@ -74,3 +74,48 @@
 - [x] 开机自启、隐藏启动和关闭到系统托盘
 - [x] 提醒策略单元测试
 - [ ] GitHub Actions Windows安装包构建
+
+## v0.4 Windows application guard
+
+### Task 8.1: Native monitor foundation
+
+**Acceptance criteria:**
+- [x] 进程名只允许安全的映像文件名格式
+- [x] 系统关键进程与本软件自身被拒绝
+- [x] 后台监视器停止后不修改任何系统状态
+
+**Verification:** Rust unit tests in GitHub Actions; source review on non-Windows workspace.
+
+### Task 8.2: Tauri command boundary
+
+**Acceptance criteria:**
+- [x] 前端只能调用启动、停止和读取状态三个命令
+- [x] 重复启动和停止保持幂等
+- [x] 启动时立即尝试关闭已运行的名单程序
+
+**Verification:** Windows build and manual invocation.
+
+### Task 8.3: Focus lifecycle integration
+
+**Acceptance criteria:**
+- [x] `active` 开启保护
+- [x] `temporary-unlock` 与 `idle` 停止保护
+- [x] 刷新或重启后按保存的专注状态恢复
+
+**Verification:** Frontend policy unit tests and manual state transitions.
+
+### Task 8.4: Truthful UI
+
+**Acceptance criteria:**
+- [x] 界面区分未接通、待命、运行中
+- [x] 显示有效程序数和累计拦截次数
+- [x] 网站设置明确标为后续功能
+
+**Verification:** Production build and Windows screenshot review.
+
+### Checkpoint
+
+- [x] `vitest run`
+- [x] `tsc -b`
+- [x] `vite build`
+- [ ] GitHub Actions Windows installer

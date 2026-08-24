@@ -39,6 +39,9 @@ jobs:
       - name: Run tests
         run: npm run test
 
+      - name: Run Rust tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
       - name: Build Windows installers
         run: npm run desktop:build
 
