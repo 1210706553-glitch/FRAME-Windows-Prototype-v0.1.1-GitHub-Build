@@ -67,7 +67,7 @@ export interface DailyRecord {
 }
 
 export interface AppState {
-  schemaVersion: 2;
+  schemaVersion: 3;
   project: ProjectPlan | null;
   preferences: UserPreferences;
   focus: FocusSession;

@@ -33,7 +33,10 @@ import {
   createTemplateTasks,
   daysUntil,
   localDateKey,
+  parseDateKey,
+  plannedFinishDate,
   remainingMinutes,
+  reflowPendingTasks,
   replanIncompleteTasks,
 } from "./lib/planner";
 import { configureReminderRuntime, sendNativeReminder, type ReminderRuntimeStatus } from "./lib/native-reminders";
@@ -65,15 +68,18 @@ const defaultPreferences: UserPreferences = {
 };
 
 function emptyState(): AppState {
-  return { schemaVersion: 2, project: null, preferences: defaultPreferences, focus: { status: "idle" }, records: [] };
+  return { schemaVersion: 3, project: null, preferences: defaultPreferences, focus: { status: "idle" }, records: [] };
 }
 
 function loadState(): AppState {
   try {
-    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null") as AppState | null;
-    return parsed?.schemaVersion === 2
-      ? { ...parsed, preferences: { ...defaultPreferences, ...parsed.preferences } }
-      : emptyState();
+    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null") as (Omit<AppState, "schemaVersion"> & { schemaVersion?: number }) | null;
+    if (!parsed || (parsed.schemaVersion !== 2 && parsed.schemaVersion !== 3)) return emptyState();
+    const preferences = { ...defaultPreferences, ...parsed.preferences };
+    const project = parsed.project && parsed.schemaVersion === 2
+      ? { ...parsed.project, tasks: reflowPendingTasks(parsed.project.tasks, todayKey, preferences.restWeekday, preferences.dailyMinutes) }
+      : parsed.project;
+    return { ...parsed, schemaVersion: 3, project, preferences };
   } catch {
     return emptyState();
   }
@@ -139,6 +145,8 @@ function App() {
   const remainingToday = todayTasks.filter((task) => task.status !== "done").reduce((sum, task) => sum + task.estimateMinutes, 0);
   const nextTask = todayTasks.find((task) => task.status === "doing") ?? todayTasks.find((task) => task.status === "todo");
   const deadlineDays = project ? daysUntil(project.targetDate) : 0;
+  const expectedFinishDate = plannedFinishDate(tasks);
+  const finishBufferDays = project && expectedFinishDate ? daysUntil(project.targetDate, parseDateKey(expectedFinishDate)) : 0;
   const activeFocusTask = tasks.find((task) => task.id === state.focus.taskId);
   const focusElapsedMinutes = state.focus.startedAt ? Math.max(0, Math.floor((now - new Date(state.focus.startedAt).getTime()) / 60_000)) : 0;
   const focusTargetSeconds = (state.focus.durationMinutes ?? 0) * 60;
@@ -368,7 +376,7 @@ function App() {
     setReminderToast((current) => current?.key === decision.key ? { ...current, native } : current);
   }
 
-  if (!project) return <Onboarding onCreate={(createdProject, preferences) => setState({ schemaVersion: 2, project: createdProject, preferences, focus: { status: "idle" }, records: [] })} />;
+  if (!project) return <Onboarding onCreate={(createdProject, preferences) => setState({ schemaVersion: 3, project: createdProject, preferences, focus: { status: "idle" }, records: [] })} />;
 
   return (
     <div className="app-shell">
@@ -417,6 +425,8 @@ function App() {
           remainingToday={remainingToday}
           remaining={remaining}
           deadlineDays={deadlineDays}
+          expectedFinishDate={expectedFinishDate}
+          finishBufferDays={finishBufferDays}
           nextTask={nextTask}
           quickTask={quickTask}
           setQuickTask={setQuickTask}
@@ -464,6 +474,8 @@ function TodayView(props: {
   remainingToday: number;
   remaining: number;
   deadlineDays: number;
+  expectedFinishDate?: string;
+  finishBufferDays: number;
   nextTask?: CreationTask;
   quickTask: string;
   setQuickTask: (value: string) => void;
@@ -484,7 +496,7 @@ function TodayView(props: {
       <article className="metric-card ring-card"><ProgressRing value={props.todayPercent} /><div><span>今日完成</span><strong>{props.todayTasks.filter((task) => task.status === "done").length} / {props.todayTasks.length}项</strong><small>{props.remainingToday ? `还需约${formatMinutes(props.remainingToday)}` : "今天的任务已经完成"}</small></div></article>
       <article className="metric-card"><span className="metric-icon violet"><TrendingUp size={18} /></span><div><span>项目总进度</span><strong>{props.projectPercent}%</strong><div className="metric-bar"><i style={{ width: `${props.projectPercent}%` }} /></div></div></article>
       <article className="metric-card"><span className="metric-icon green"><Clock3 size={18} /></span><div><span>剩余工作量</span><strong>{formatMinutes(props.remaining)}</strong><small>根据当前任务估算</small></div></article>
-      <article className={`metric-card ${props.deadlineDays < 3 ? "risk" : ""}`}><span className="metric-icon amber"><Target size={18} /></span><div><span>距离目标发布</span><strong>{props.deadlineDays >= 0 ? `${props.deadlineDays}天` : `超出${Math.abs(props.deadlineDays)}天`}</strong><small>{prettyDate(props.project.targetDate)}</small></div></article>
+      <article className={`metric-card ${props.finishBufferDays < 0 || props.deadlineDays < 3 ? "risk" : ""}`}><span className="metric-icon amber"><Target size={18} /></span><div><span>距离目标发布</span><strong>{props.deadlineDays >= 0 ? `${props.deadlineDays}天` : `超出${Math.abs(props.deadlineDays)}天`}</strong><small>{props.expectedFinishDate ? `预计${prettyDate(props.expectedFinishDate)}完成 · ${props.finishBufferDays >= 0 ? `提前${props.finishBufferDays}天` : `预计逾期${Math.abs(props.finishBufferDays)}天`}` : prettyDate(props.project.targetDate)}</small></div></article>
     </section>
 
     <section className="today-grid">

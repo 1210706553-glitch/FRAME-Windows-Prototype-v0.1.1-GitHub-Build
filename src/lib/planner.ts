@@ -126,6 +126,20 @@ export function replanIncompleteTasks(tasks: CreationTask[], fromDate: string, r
   return [...fixed, ...scheduleTasks(movable, nextWorkDate(fromDate, restWeekday), dailyMinutes, restWeekday)];
 }
 
+export function reflowPendingTasks(tasks: CreationTask[], fromDate: string, restWeekday: number, dailyMinutes: number): CreationTask[] {
+  const fixed = tasks.filter((task) => task.status === "done" || task.plannedDate < fromDate);
+  const movable = tasks
+    .filter((task) => task.status !== "done" && task.plannedDate >= fromDate)
+    .map((task) => ({ ...task, status: task.status === "doing" ? "todo" as const : task.status }));
+  return [...fixed, ...scheduleTasks(movable, fromDate, dailyMinutes, restWeekday)];
+}
+
+export function plannedFinishDate(tasks: CreationTask[]): string | undefined {
+  return tasks
+    .filter((task) => task.status !== "done")
+    .reduce<string | undefined>((latest, task) => !latest || task.plannedDate > latest ? task.plannedDate : latest, undefined);
+}
+
 export function daysUntil(targetDate: string, now = new Date()): number {
   const target = parseDateKey(targetDate).getTime();
   const today = parseDateKey(localDateKey(now)).getTime();

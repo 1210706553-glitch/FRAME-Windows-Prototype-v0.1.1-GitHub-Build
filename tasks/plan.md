@@ -1,0 +1,67 @@
+# Implementation Plan: 张诗语の米奇妙妙工具 v0.2.0
+
+## Overview
+
+把旧的视频工作台重构为一个单项目、离线优先的视频创作执行工具。第一里程碑只交付每天真正会使用的闭环：创建计划、查看今日任务、看到剩余进度、开始专注、完成或说明未完成、重新排期。视频播放器、素材节点时间线、Premiere XML 和空壳脚本入口退出主界面。
+
+## Architecture Decisions
+
+- React 负责每日看板与本地状态；第一里程碑使用版本化 localStorage，保证当前前端可独立运行和验证。
+- 一次只允许一个进行中的项目；完成后进入只读历史的能力放在后续切片。
+- 今日任务限制为 2～5 项，按预计分钟数与依赖顺序自动排期。
+- AI 不进入每日执行环节；DeepSeek 只在后续“素材梳理、粗剪、大纲”切片中生成观察和任务。
+- 专注计时先建立完整状态机；Windows 进程/网站系统级封锁作为下一垂直切片接入 Rust。
+- 保持 `com.sunday.frame` 标识和旧数据目录，避免升级主动清空本机数据。
+
+## Task List
+
+### Phase 1: Daily execution foundation
+
+- [x] Task 1: 建立项目、任务、日程与专注状态模型
+- [x] Task 2: 实现自动任务模板、2～5项日排程与进度计算
+- [x] Task 3: 重做首次启动与单项目创建流程
+
+### Checkpoint: Foundation
+
+- [x] 纯函数测试通过
+- [x] 刷新后项目与任务状态可恢复
+
+### Phase 2: Core daily loop
+
+- [x] Task 4: 实现今日任务看板、手动勾选与快速添加
+- [x] Task 5: 实现项目总进度、剩余时间、截止日与阶段视图
+- [x] Task 6: 实现专注计时、15分钟临时解锁与结束条件
+- [x] Task 7: 实现无法制作、未完成原因、休息日与重新排期
+
+### Checkpoint: Core daily loop
+
+- [x] 创建项目到完成任务的流程可端到端运行
+- [x] 每日任务数量与剩余量显示正确
+- [x] 刷新时专注计时不丢失
+
+### Phase 3: Native enforcement and AI
+
+- [ ] Task 8: Windows 进程阻止与运行中游戏检测
+- [x] Task 9a: Windows 原生通知、开机自启与系统托盘
+- [ ] Task 9b: 可选的持续条与全屏提醒
+- [ ] Task 10: DeepSeek 接入第1～3阶段梳理
+- [ ] Task 11: 本地转写和稀疏关键帧预处理
+
+### Checkpoint: Complete
+
+- [ ] Windows EXE 真实设备测试通过
+- [ ] 系统级阻止可恢复且不会遗留 hosts/进程状态
+- [ ] DeepSeek 不参与第4～7阶段
+
+## Risks and Mitigations
+
+| Risk | Impact | Mitigation |
+|---|---|---|
+| 一次实现全部功能再次臃肿 | High | 按垂直闭环分阶段，每个阶段都可独立使用 |
+| 系统级网站阻止需要管理员权限 | High | 单独实现、记录修改、异常退出自动恢复 |
+| localStorage 后期迁移 SQLite | Medium | 状态对象带 schemaVersion，后续统一迁移 |
+| 自动排期不符合真实工作量 | Medium | 用户可改预计分钟数、日期和每日容量 |
+
+## Open Questions
+
+- Windows 网站阻止采用 hosts 还是本地代理，在 Task 8 前通过真实机器测试再决定。

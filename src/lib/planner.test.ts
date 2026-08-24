@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { completionPercent, createTemplateTasks, isRestDay, replanIncompleteTasks } from "./planner";
+import { completionPercent, createTemplateTasks, isRestDay, plannedFinishDate, reflowPendingTasks, replanIncompleteTasks } from "./planner";
 
 describe("planner", () => {
   it("schedules two to five tasks per workday and skips the rest weekday", () => {
@@ -15,6 +15,8 @@ describe("planner", () => {
       expect(dayTasks.length).toBeGreaterThanOrEqual(2);
       expect(dayTasks.length).toBeLessThanOrEqual(5);
     }
+    expect(grouped.get("2026-08-24")).toHaveLength(4);
+    expect(grouped.get("2026-08-24")?.reduce((sum, task) => sum + task.estimateMinutes, 0)).toBe(150);
   });
 
   it("uses task weights for project completion", () => {
@@ -35,5 +37,17 @@ describe("planner", () => {
     const tasks = createTemplateTasks("2026-08-24", 150, 0, 1);
     const replanned = replanIncompleteTasks(tasks, "2026-08-24", 0, 150);
     expect(replanned.filter((task) => task.status !== "done").every((task) => task.plannedDate > "2026-08-24")).toBe(true);
+  });
+
+  it("repairs a sparse current day by filling it from pending tasks", () => {
+    const tasks = createTemplateTasks("2026-08-24", 150, -1, 1).map((task, index) => ({
+      ...task,
+      plannedDate: index === 0 ? "2026-08-24" : task.plannedDate < "2026-08-25" ? "2026-08-25" : task.plannedDate,
+    }));
+    const repaired = reflowPendingTasks(tasks, "2026-08-24", -1, 150);
+    const today = repaired.filter((task) => task.plannedDate === "2026-08-24");
+    expect(today).toHaveLength(4);
+    expect(today.reduce((sum, task) => sum + task.estimateMinutes, 0)).toBe(150);
+    expect(plannedFinishDate(repaired)).toBe("2026-08-31");
   });
 });
