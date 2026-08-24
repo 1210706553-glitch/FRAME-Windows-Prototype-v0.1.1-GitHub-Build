@@ -1,4 +1,4 @@
-import { CREATION_STAGES, type CreationStage, type CreationTask } from "../types";
+import { CREATION_STAGES, type AiSuggestedTask, type CreationStage, type CreationTask } from "../types";
 
 type TaskTemplate = { title: string; note: string; minutes: number; weight: number };
 
@@ -105,6 +105,39 @@ export function createTemplateTasks(startDate: string, dailyMinutes: number, res
     createdAt,
   })));
   return scheduleTasks(tasks, startDate, dailyMinutes, restWeekday);
+}
+
+export function replacePendingAiPlanningTasks(
+  tasks: CreationTask[],
+  suggestions: AiSuggestedTask[],
+  startDate: string,
+  dailyMinutes: number,
+  restWeekday: number,
+  seed = Date.now(),
+): CreationTask[] {
+  const aiStages = new Set<CreationStage>(["素材梳理", "粗剪", "大纲"]);
+  const stageOrder = new Map<CreationStage, number>(CREATION_STAGES.map((stage, index) => [stage, index]));
+  const completed = tasks.filter((task) => task.status === "done");
+  const laterPending = tasks.filter((task) => task.status !== "done" && !aiStages.has(task.stage));
+  const createdAt = new Date(seed).toISOString();
+  const generated = suggestions
+    .filter((task) => aiStages.has(task.stage) && task.title.trim())
+    .sort((left, right) => (stageOrder.get(left.stage) ?? 0) - (stageOrder.get(right.stage) ?? 0))
+    .map((task, index): CreationTask => {
+      const estimateMinutes = Math.min(120, Math.max(15, Math.round(task.estimateMinutes)));
+      return {
+        id: `ai-task-${seed}-${index}`,
+        title: task.title.trim(),
+        note: task.note.trim() || "完成后在软件中勾选任务。",
+        stage: task.stage,
+        estimateMinutes,
+        weight: estimateMinutes > 75 ? 3 : estimateMinutes > 40 ? 2 : 1,
+        status: "todo",
+        plannedDate: startDate,
+        createdAt,
+      };
+    });
+  return [...completed, ...scheduleTasks([...generated, ...laterPending], startDate, dailyMinutes, restWeekday)];
 }
 
 export function completionPercent(tasks: CreationTask[]): number {

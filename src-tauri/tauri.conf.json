@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "张诗语の米奇妙妙工具",
-  "version": "0.4.1",
+  "version": "0.6.0",
   "identifier": "com.sunday.frame",
   "build": {
     "frontendDist": "../dist",
@@ -31,6 +31,7 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -40,6 +41,17 @@
     ],
     "android": {
       "debugApplicationIdSuffix": ".debug"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDU4Nzk0MkU4MDJDNDY2NDUKUldSRlpzUUM2RUo1V0VzMVNXMVNReExPcWRkazhSUmladDNUc2kyUGJQSTBvbGdDZDhhYmtXNEQK",
+      "endpoints": [
+        "https://github.com/1210706553-glitch/FRAME-Windows-Prototype-v0.1.1-GitHub-Build/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

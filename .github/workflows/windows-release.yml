@@ -1,19 +1,21 @@
-name: Build Windows Installer
+name: Publish Windows Release
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
+    inputs:
+      release_notes:
+        description: Release notes shown in the update dialog
+        required: false
+        default: 修复问题并改进使用体验。
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  build-windows:
-    name: Windows NSIS EXE
+  publish-windows:
+    name: Signed Windows NSIS Release
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 50
 
     steps:
       - name: Checkout source
@@ -36,8 +38,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run tests
-        run: npm run test
+      - name: Run frontend checks
+        run: |
+          npm run lint
+          npm run test
+          npm run build
 
       - name: Run Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
@@ -55,15 +60,18 @@ jobs:
             throw "Missing repository secret: TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
           }
 
-      - name: Build Windows installers
-        run: npm run desktop:build
+      - name: Build and publish signed release
+        uses: tauri-apps/tauri-action@v1
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-
-      - name: Upload NSIS installer
-        uses: actions/upload-artifact@v4
         with:
-          name: MickeyToolkit-Windows-EXE
-          path: src-tauri/target/release/bundle/nsis/*.exe
-          if-no-files-found: error
+          tagName: v__VERSION__
+          releaseName: 张诗语の米奇妙妙工具 v__VERSION__
+          releaseBody: ${{ inputs.release_notes }}
+          releaseDraft: false
+          prerelease: false
+          args: --bundles nsis
+          uploadUpdaterJson: true
+          updaterJsonPreferNsis: true

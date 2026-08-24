@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import {
   AlarmClock,
   ArrowRight,
@@ -7,6 +7,7 @@ import {
   CalendarDays,
   Check,
   CheckCircle2,
+  ChevronLeft,
   ChevronRight,
   CircleDot,
   Clock3,
@@ -29,6 +30,8 @@ import {
   X,
 } from "lucide-react";
 import "./App.css";
+import AiPlannerModal from "./AiPlannerModal";
+import UpdateDialog, { type UpdateDialogPhase } from "./UpdateDialog";
 import {
   addDays,
   completionPercent,
@@ -38,20 +41,29 @@ import {
   parseDateKey,
   plannedFinishDate,
   remainingMinutes,
-  reflowPendingTasks,
   replanIncompleteTasks,
+  replacePendingAiPlanningTasks,
 } from "./lib/planner";
+import { migrateStoredState, type StoredAppState } from "./lib/state";
 import { configureReminderRuntime, sendNativeReminder, type ReminderRuntimeStatus } from "./lib/native-reminders";
 import { shouldRunAppGuard } from "./lib/app-guard-policy";
 import { listRunningApplications, readNativeAppGuard, syncNativeAppGuard, type AppGuardRuntimeStatus, type RunningApplication } from "./lib/native-app-guard";
 import { mergeApplicationNames } from "./lib/running-apps";
 import { evaluateReminder, type ReminderDecision } from "./lib/reminders";
 import {
+  FALLBACK_APP_VERSION,
+  checkForAppUpdate,
+  downloadInstallAndRestart,
+  toUpdateErrorMessage,
+  type AvailableAppUpdate,
+} from "./lib/app-updater";
+import {
   CREATION_STAGES,
   type AppState,
   type AppView,
   type CreationTask,
   type DailyRecord,
+  type ProjectAnalysis,
   type ProjectPlan,
   type UserPreferences,
 } from "./types";
@@ -60,6 +72,14 @@ const STORAGE_KEY = "mickey-toolkit.state.v2";
 const REMINDER_LOG_KEY = "mickey-toolkit.reminders.v1";
 const weekdays = ["周日", "周一", "周二", "周三", "周四", "周五", "周六"];
 const todayKey = localDateKey();
+
+type UpdateRuntimeState = {
+  phase: "idle" | "checking" | "latest" | "available" | "downloading" | "installing" | "error" | "unsupported";
+  currentVersion: string;
+  update?: AvailableAppUpdate;
+  percent?: number;
+  error?: string;
+};
 
 const defaultPreferences: UserPreferences = {
   displayName: "",
@@ -73,18 +93,13 @@ const defaultPreferences: UserPreferences = {
 };
 
 function emptyState(): AppState {
-  return { schemaVersion: 3, project: null, preferences: defaultPreferences, focus: { status: "idle" }, records: [] };
+  return { schemaVersion: 4, project: null, preferences: defaultPreferences, focus: { status: "idle" }, records: [] };
 }
 
 function loadState(): AppState {
   try {
-    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null") as (Omit<AppState, "schemaVersion"> & { schemaVersion?: number }) | null;
-    if (!parsed || (parsed.schemaVersion !== 2 && parsed.schemaVersion !== 3)) return emptyState();
-    const preferences = { ...defaultPreferences, ...parsed.preferences };
-    const project = parsed.project && parsed.schemaVersion === 2
-      ? { ...parsed.project, tasks: reflowPendingTasks(parsed.project.tasks, todayKey, preferences.restWeekday, preferences.dailyMinutes) }
-      : parsed.project;
-    return { ...parsed, schemaVersion: 3, project, preferences };
+    const parsed = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null") as StoredAppState | null;
+    return migrateStoredState(parsed, defaultPreferences, todayKey) ?? emptyState();
   } catch {
     return emptyState();
   }
@@ -112,6 +127,89 @@ function prettyDate(value: string): string {
   return `${date.getMonth() + 1}月${date.getDate()}日`;
 }
 
+function dateKeyFromParts(year: number, month: number, day: number): string {
+  return `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+function DatePickerField({ value, min, onChange }: { value: string; min?: string; onChange: (value: string) => void }) {
+  const initialDate = value ? parseDateKey(value) : new Date();
+  const [open, setOpen] = useState(false);
+  const [visibleMonth, setVisibleMonth] = useState(() => new Date(initialDate.getFullYear(), initialDate.getMonth(), 1));
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  function toggleCalendar() {
+    if (!open) {
+      const selected = value ? parseDateKey(value) : new Date();
+      setVisibleMonth(new Date(selected.getFullYear(), selected.getMonth(), 1));
+    }
+    setOpen((current) => !current);
+  }
+
+  const year = visibleMonth.getFullYear();
+  const month = visibleMonth.getMonth();
+  const firstDayOffset = (new Date(year, month, 1).getDay() + 6) % 7;
+  const gridStart = new Date(year, month, 1 - firstDayOffset);
+  const calendarDays = Array.from({ length: 42 }, (_, index) => {
+    const date = new Date(gridStart);
+    date.setDate(gridStart.getDate() + index);
+    return date;
+  });
+
+  return <div className="date-picker-field" ref={rootRef}>
+    <input
+      aria-label="目标发布日期"
+      type="date"
+      min={min}
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+    />
+    <button className="date-picker-trigger" type="button" aria-label="打开日期选择器" aria-expanded={open} onClick={toggleCalendar}>
+      <CalendarDays size={16} />
+    </button>
+    {open && <section className="date-picker-popover" aria-label="选择目标发布日期">
+      <header>
+        <button type="button" aria-label="上个月" onClick={() => setVisibleMonth(new Date(year, month - 1, 1))}><ChevronLeft size={16} /></button>
+        <strong>{year}年{month + 1}月</strong>
+        <button type="button" aria-label="下个月" onClick={() => setVisibleMonth(new Date(year, month + 1, 1))}><ChevronRight size={16} /></button>
+      </header>
+      <div className="date-picker-weekdays" aria-hidden="true">{["一", "二", "三", "四", "五", "六", "日"].map((day) => <span key={day}>{day}</span>)}</div>
+      <div className="date-picker-days">
+        {calendarDays.map((date) => {
+          const dateKey = dateKeyFromParts(date.getFullYear(), date.getMonth(), date.getDate());
+          const disabled = Boolean(min && dateKey < min);
+          const isCurrentMonth = date.getMonth() === month;
+          const isToday = dateKey === todayKey;
+          return <button
+            key={dateKey}
+            type="button"
+            disabled={disabled}
+            className={`${isCurrentMonth ? "" : "outside"} ${isToday ? "today" : ""} ${dateKey === value ? "selected" : ""}`}
+            aria-label={`${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`}
+            onClick={() => { onChange(dateKey); setOpen(false); }}
+          >{date.getDate()}</button>;
+        })}
+      </div>
+      <footer><button type="button" onClick={() => { onChange(todayKey); setOpen(false); }}>选择今天</button></footer>
+    </section>}
+  </div>;
+}
+
 function ProgressRing({ value, size = 92 }: { value: number; size?: number }) {
   const radius = 38;
   const circumference = 2 * Math.PI * radius;
@@ -131,6 +229,7 @@ function App() {
   const [state, setState] = useState<AppState>(loadState);
   const [view, setView] = useState<AppView>("today");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [aiPlannerOpen, setAiPlannerOpen] = useState(false);
   const [unavailableOpen, setUnavailableOpen] = useState(false);
   const [unlockOpen, setUnlockOpen] = useState(false);
   const [reason, setReason] = useState("");
@@ -140,6 +239,11 @@ function App() {
   const [reminderToast, setReminderToast] = useState<(ReminderDecision & { native: boolean }) | null>(null);
   const [reminderRuntime, setReminderRuntime] = useState<ReminderRuntimeStatus | null>(null);
   const [appGuardRuntime, setAppGuardRuntime] = useState<AppGuardRuntimeStatus | null>(null);
+  const [updateRuntime, setUpdateRuntime] = useState<UpdateRuntimeState>({ phase: "idle", currentVersion: FALLBACK_APP_VERSION });
+  const [updateDialogOpen, setUpdateDialogOpen] = useState(false);
+  const automaticUpdateCheckStarted = useRef(false);
+  const deferredUpdatePrompt = useRef(false);
+  const checkForUpdatesOnLaunch = useEffectEvent(() => void runUpdateCheck(false));
 
   const project = state.project;
   const tasks = project?.tasks ?? [];
@@ -162,6 +266,19 @@ function App() {
   const canFinishFocus = focusElapsedMinutes >= 120 || (todayTasks.length > 0 && todayTasks.every((task) => task.status === "done") && focusElapsedMinutes >= 30);
 
   useEffect(() => localStorage.setItem(STORAGE_KEY, JSON.stringify(state)), [state]);
+
+  useEffect(() => {
+    if (automaticUpdateCheckStarted.current) return;
+    automaticUpdateCheckStarted.current = true;
+    const timer = window.setTimeout(checkForUpdatesOnLaunch, 2_500);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (state.focus.status !== "idle" || !deferredUpdatePrompt.current || updateRuntime.phase !== "available") return;
+    deferredUpdatePrompt.current = false;
+    setUpdateDialogOpen(true);
+  }, [state.focus.status, updateRuntime.phase]);
 
   useEffect(() => {
     if (!project) return;
@@ -393,6 +510,27 @@ function App() {
     setView("today");
   }
 
+  function applyAiAnalysis(analysis: ProjectAnalysis) {
+    setState((current) => {
+      if (!current.project) return current;
+      return {
+        ...current,
+        project: {
+          ...current.project,
+          analysis,
+          tasks: replacePendingAiPlanningTasks(
+            current.project.tasks,
+            analysis.result.tasks,
+            currentDateKey,
+            current.preferences.dailyMinutes,
+            current.preferences.restWeekday,
+          ),
+        },
+      };
+    });
+    setAiPlannerOpen(false);
+  }
+
   async function sendTestReminder() {
     const decision: ReminderDecision = {
       key: `test:${Date.now()}`,
@@ -413,7 +551,75 @@ function App() {
     }, 5_000);
   }
 
-  if (!project) return <Onboarding onCreate={(createdProject, preferences) => setState({ schemaVersion: 3, project: createdProject, preferences, focus: { status: "idle" }, records: [] })} />;
+  async function runUpdateCheck(manual: boolean) {
+    if (updateRuntime.phase === "downloading" || updateRuntime.phase === "installing") return;
+    if (manual && updateRuntime.phase === "available" && updateRuntime.update) {
+      if (state.focus.status === "idle") {
+        setSettingsOpen(false);
+        setUpdateDialogOpen(true);
+      }
+      return;
+    }
+
+    setUpdateRuntime((current) => ({ ...current, phase: "checking", error: undefined, percent: undefined }));
+    try {
+      const result = await checkForAppUpdate();
+      if (result.kind === "available") {
+        setUpdateRuntime({
+          phase: "available",
+          currentVersion: result.currentVersion,
+          update: result.update,
+        });
+        if (state.focus.status === "idle") {
+          if (manual) setSettingsOpen(false);
+          setUpdateDialogOpen(true);
+        } else {
+          deferredUpdatePrompt.current = true;
+        }
+        return;
+      }
+      setUpdateRuntime({
+        phase: result.kind === "unsupported" ? "unsupported" : "latest",
+        currentVersion: result.currentVersion,
+      });
+    } catch (error) {
+      setUpdateRuntime((current) => ({
+        ...current,
+        phase: "error",
+        error: toUpdateErrorMessage(error),
+        percent: undefined,
+      }));
+    }
+  }
+
+  async function installAvailableUpdate() {
+    const update = updateRuntime.update;
+    if (!update) return;
+    setUpdateRuntime((current) => ({ ...current, phase: "downloading", percent: undefined, error: undefined }));
+    try {
+      await downloadInstallAndRestart(update, (progress) => {
+        setUpdateRuntime((current) => ({
+          ...current,
+          phase: progress.percent === 100 ? "installing" : "downloading",
+          percent: progress.percent,
+        }));
+      });
+    } catch (error) {
+      setUpdateRuntime((current) => ({
+        ...current,
+        phase: "error",
+        error: toUpdateErrorMessage(error),
+      }));
+    }
+  }
+
+  function closeUpdateDialog() {
+    if (updateRuntime.phase === "downloading" || updateRuntime.phase === "installing") return;
+    deferredUpdatePrompt.current = false;
+    setUpdateDialogOpen(false);
+  }
+
+  if (!project) return <Onboarding onCreate={(createdProject, preferences) => setState({ schemaVersion: 4, project: createdProject, preferences, focus: { status: "idle" }, records: [] })} />;
 
   return (
     <div className="app-shell">
@@ -472,7 +678,7 @@ function App() {
           onStartTask={startFocus}
           onUnavailable={() => setUnavailableOpen(true)}
         />}
-        {view === "plan" && <PlanView project={project} onToggleTask={toggleTask} />}
+        {view === "plan" && <PlanView project={project} focusActive={state.focus.status !== "idle"} onOpenAi={() => setAiPlannerOpen(true)} onToggleTask={toggleTask} />}
         {view === "focus" && <FocusView
           task={activeFocusTask}
           focusStatus={state.focus.status}
@@ -490,10 +696,20 @@ function App() {
         {view === "review" && <ReviewView records={state.records} tasks={tasks} todayKey={currentDateKey} />}
       </main>
 
-      {settingsOpen && <SettingsModal state={state} setState={setState} reminderRuntime={reminderRuntime} appGuardRuntime={appGuardRuntime} onTestReminder={sendTestReminder} onTestAppGuard={testAppGuard} onClose={() => setSettingsOpen(false)} onReset={resetProject} />}
+      {settingsOpen && <SettingsModal state={state} setState={setState} reminderRuntime={reminderRuntime} appGuardRuntime={appGuardRuntime} updateRuntime={updateRuntime} onCheckUpdate={() => void runUpdateCheck(true)} onTestReminder={sendTestReminder} onTestAppGuard={testAppGuard} onClose={() => setSettingsOpen(false)} onReset={resetProject} />}
+      {aiPlannerOpen && <AiPlannerModal project={project} onClose={() => setAiPlannerOpen(false)} onConfirm={applyAiAnalysis} />}
       {unavailableOpen && <ReasonModal title="今天确实无法制作？" description="写下真实原因。每周第一次会使用动态休息日；之后会记录缺勤并把任务顺延。" reason={reason} setReason={setReason} confirm="确认并重新排期" onConfirm={submitUnavailable} onClose={() => { setUnavailableOpen(false); setReason(""); }} />}
       {unlockOpen && <ReasonModal title="临时解锁15分钟" description="写下你现在必须离开专注模式的原因。15分钟后会自动恢复。" reason={reason} setReason={setReason} confirm="开始临时解锁" onConfirm={grantTemporaryUnlock} onClose={() => { setUnlockOpen(false); setReason(""); }} />}
       {reminderToast && <button className="reminder-toast" onClick={() => { setView("today"); setReminderToast(null); }}><BellRing size={19} /><span><strong>{reminderToast.title}</strong><small>{reminderToast.body}</small></span><em>{reminderToast.native ? "Windows已提醒" : "软件内提醒"}</em></button>}
+      {updateDialogOpen && updateRuntime.update && <UpdateDialog
+        update={updateRuntime.update}
+        phase={(updateRuntime.phase === "latest" || updateRuntime.phase === "idle" || updateRuntime.phase === "checking" || updateRuntime.phase === "unsupported" ? "available" : updateRuntime.phase) as UpdateDialogPhase}
+        percent={updateRuntime.percent}
+        error={updateRuntime.error}
+        onInstall={() => void installAvailableUpdate()}
+        onRetry={() => void runUpdateCheck(true)}
+        onClose={closeUpdateDialog}
+      />}
     </div>
   );
 }
@@ -563,8 +779,8 @@ function TaskRow({ task, recommended, index, onToggle, onStart }: { task: Creati
   </article>;
 }
 
-function PlanView({ project, onToggleTask }: { project: ProjectPlan; onToggleTask: (task: CreationTask) => void }) {
-  return <div className="page plan-page"><section className="page-hero"><div><span className="eyebrow">PROJECT ROADMAP</span><h1>从素材到发布，只保留七个阶段</h1><p>{project.name} · 目标 {prettyDate(project.targetDate)} 发布</p></div><div className="hero-progress"><ProgressRing value={completionPercent(project.tasks)} size={78} /><span>总进度</span></div></section><section className="stage-list">{CREATION_STAGES.map((stage, index) => {
+function PlanView({ project, focusActive, onOpenAi, onToggleTask }: { project: ProjectPlan; focusActive: boolean; onOpenAi: () => void; onToggleTask: (task: CreationTask) => void }) {
+  return <div className="page plan-page"><section className="page-hero"><div><span className="eyebrow">PROJECT ROADMAP</span><h1>从素材到发布，只保留七个阶段</h1><p>{project.name} · 目标 {prettyDate(project.targetDate)} 发布</p></div><div className="hero-progress"><ProgressRing value={completionPercent(project.tasks)} size={78} /><span>总进度</span></div></section><section className={`ai-plan-entry panel ${project.analysis ? "ready" : ""}`}><div className="ai-plan-entry-icon"><Sparkles size={20} /></div><div className="ai-plan-entry-copy"><span>AI 只参与阶段 1—3</span><strong>{project.analysis ? "前三阶段已经完成一次梳理" : "导入字幕，一次生成三份可编辑结果"}</strong><p>{project.analysis ? `${project.analysis.sourceFileName} · ${new Date(project.analysis.analyzedAt).toLocaleDateString("zh-CN")} · 可随时重新查看修改` : "支持 SRT / TXT；先在本地预览，点击分析后才发送给 DeepSeek。后续制作仍由每日任务督促你完成。"}</p></div><button className="button primary" disabled={focusActive} title={focusActive ? "结束专注后再调整项目计划" : undefined} onClick={onOpenAi}>{project.analysis ? "查看与修改" : "导入字幕并梳理"}<ArrowRight size={15} /></button></section><section className="stage-list">{CREATION_STAGES.map((stage, index) => {
     const stageTasks = project.tasks.filter((task) => task.stage === stage);
     const done = stageTasks.filter((task) => task.status === "done").length;
     const percent = stageTasks.length ? Math.round((done / stageTasks.length) * 100) : 0;
@@ -604,10 +820,10 @@ function Onboarding({ onCreate }: { onCreate: (project: ProjectPlan, preferences
     onCreate(project, preferences);
   }
 
-  return <main className="onboarding"><section className="onboarding-card"><div className="onboarding-visual"><img src="/mickey-toolkit-icon.png" alt="" /><span className="eyebrow">WELCOME</span><h1>张诗语の<br/>米奇妙妙工具</h1><p>它不替你做视频，只把每天该做的事情摆在眼前，并陪你按时做完。</p><ul><li><Check size={15} />每天只安排2～5项</li><li><Check size={15} />清楚显示还差多少</li><li><Check size={15} />开始后进入专注状态</li></ul></div><form onSubmit={(event) => { event.preventDefault(); submit(); }}><header><span>第一次设置</span><h2>先建立你的当前项目</h2><p>每个人填写自己的时间，只保存在当前电脑。</p></header><div className="form-grid"><label><span>怎么称呼你</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="可不填" /></label><label><span>项目名称 *</span><input autoFocus required value={projectName} onChange={(event) => setProjectName(event.target.value)} placeholder="例如：Low-Budget Repairs" /></label><label><span>游戏或素材来源</span><input value={game} onChange={(event) => setGame(event.target.value)} placeholder="例如：Low-Budget Repairs" /></label><label><span>主要发布平台</span><select value={platform} onChange={(event) => setPlatform(event.target.value as ProjectPlan["primaryPlatform"])}><option>B站</option><option>抖音</option><option>小红书</option><option>快手</option><option>其他</option></select></label><label><span>每天几点开始</span><input type="time" value={startTime} onChange={(event) => setStartTime(event.target.value)} /></label><label><span>每天计划投入</span><select value={dailyMinutes} onChange={(event) => setDailyMinutes(Number(event.target.value))}><option value={120}>2小时</option><option value={150}>2.5小时</option><option value={180}>3小时</option></select></label><label><span>每周休息安排</span><select value={restWeekday} onChange={(event) => setRestWeekday(Number(event.target.value))}><option value={-1}>动态休息（推荐）</option>{weekdays.map((day, index) => <option key={day} value={index}>固定{day}</option>)}</select></label><label><span>目标发布日期</span><input type="date" min={todayKey} value={targetDate} onChange={(event) => setTargetDate(event.target.value)} /></label></div><button className="button primary onboarding-submit" disabled={!projectName.trim()} type="submit">生成第一份每日计划<ArrowRight size={17} /></button></form></section></main>;
+  return <main className="onboarding"><section className="onboarding-card"><div className="onboarding-visual"><img src="/mickey-toolkit-icon.png" alt="" /><span className="eyebrow">WELCOME</span><h1>张诗语の<br/>米奇妙妙工具</h1><p>它不替你做视频，只把每天该做的事情摆在眼前，并陪你按时做完。</p><ul><li><Check size={15} />每天只安排2～5项</li><li><Check size={15} />清楚显示还差多少</li><li><Check size={15} />开始后进入专注状态</li></ul></div><form onSubmit={(event) => { event.preventDefault(); submit(); }}><header><span>第一次设置</span><h2>先建立你的当前项目</h2><p>每个人填写自己的时间，只保存在当前电脑。</p></header><div className="form-grid"><label><span>怎么称呼你</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="可不填" /></label><label><span>项目名称 *</span><input autoFocus required value={projectName} onChange={(event) => setProjectName(event.target.value)} placeholder="例如：Low-Budget Repairs" /></label><label><span>游戏或素材来源</span><input value={game} onChange={(event) => setGame(event.target.value)} placeholder="例如：Low-Budget Repairs" /></label><label><span>主要发布平台</span><select value={platform} onChange={(event) => setPlatform(event.target.value as ProjectPlan["primaryPlatform"])}><option>B站</option><option>抖音</option><option>小红书</option><option>快手</option><option>其他</option></select></label><label><span>每天几点开始</span><input type="time" value={startTime} onChange={(event) => setStartTime(event.target.value)} /></label><label><span>每天计划投入</span><select value={dailyMinutes} onChange={(event) => setDailyMinutes(Number(event.target.value))}><option value={120}>2小时</option><option value={150}>2.5小时</option><option value={180}>3小时</option></select></label><label><span>每周休息安排</span><select value={restWeekday} onChange={(event) => setRestWeekday(Number(event.target.value))}><option value={-1}>动态休息（推荐）</option>{weekdays.map((day, index) => <option key={day} value={index}>固定{day}</option>)}</select></label><div className="form-field"><span>目标发布日期</span><DatePickerField min={todayKey} value={targetDate} onChange={setTargetDate} /></div></div><button className="button primary onboarding-submit" disabled={!projectName.trim()} type="submit">生成第一份每日计划<ArrowRight size={17} /></button></form></section></main>;
 }
 
-function SettingsModal({ state, setState, reminderRuntime, appGuardRuntime, onTestReminder, onTestAppGuard, onClose, onReset }: { state: AppState; setState: React.Dispatch<React.SetStateAction<AppState>>; reminderRuntime: ReminderRuntimeStatus | null; appGuardRuntime: AppGuardRuntimeStatus | null; onTestReminder: () => void; onTestAppGuard: (apps: string[]) => void; onClose: () => void; onReset: () => void }) {
+function SettingsModal({ state, setState, reminderRuntime, appGuardRuntime, updateRuntime, onCheckUpdate, onTestReminder, onTestAppGuard, onClose, onReset }: { state: AppState; setState: React.Dispatch<React.SetStateAction<AppState>>; reminderRuntime: ReminderRuntimeStatus | null; appGuardRuntime: AppGuardRuntimeStatus | null; updateRuntime: UpdateRuntimeState; onCheckUpdate: () => void; onTestReminder: () => void; onTestAppGuard: (apps: string[]) => void; onClose: () => void; onReset: () => void }) {
   const [draft, setDraft] = useState(state.preferences);
   const [targetDate, setTargetDate] = useState(state.project?.targetDate ?? todayKey);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -656,6 +872,14 @@ function SettingsModal({ state, setState, reminderRuntime, appGuardRuntime, onTe
   }
 
   const configuredApps = new Set(draft.distractionApps.map((name) => name.trim().toLowerCase()));
+  const updateBusy = updateRuntime.phase === "checking" || updateRuntime.phase === "downloading" || updateRuntime.phase === "installing";
+  const updateDeferred = updateRuntime.phase === "available" && state.focus.status !== "idle";
+  const updateMessage = updateRuntime.phase === "checking" ? "正在连接 GitHub 检查更新…"
+    : updateRuntime.phase === "available" ? updateDeferred ? `发现 v${updateRuntime.update?.version}，结束专注后会提示` : `发现 v${updateRuntime.update?.version}，可以下载安装`
+      : updateRuntime.phase === "latest" ? "当前已经是最新正式版"
+        : updateRuntime.phase === "unsupported" ? "浏览器预览不检查桌面软件更新"
+          : updateRuntime.phase === "error" ? updateRuntime.error ?? "更新检查失败，可以稍后重试"
+            : "启动后会自动检查；只有发现新版时才提醒";
 
   return <>
     <div className="modal-backdrop" onMouseDown={onClose}>
@@ -669,7 +893,7 @@ function SettingsModal({ state, setState, reminderRuntime, appGuardRuntime, onTe
               <label><span>开始时间</span><input type="time" value={draft.dailyStartTime} onChange={(event) => setDraft({ ...draft, dailyStartTime: event.target.value })} /></label>
               <label><span>每日投入</span><select value={draft.dailyMinutes} onChange={(event) => setDraft({ ...draft, dailyMinutes: Number(event.target.value) })}><option value={120}>2小时</option><option value={150}>2.5小时</option><option value={180}>3小时</option></select></label>
               <label><span>每周休息安排</span><select value={draft.restWeekday} onChange={(event) => setDraft({ ...draft, restWeekday: Number(event.target.value) })}><option value={-1}>动态休息（推荐）</option>{weekdays.map((day, index) => <option key={day} value={index}>固定{day}</option>)}</select></label>
-              <label><span>目标发布日期</span><input type="date" value={targetDate} onChange={(event) => setTargetDate(event.target.value)} /></label>
+              <div className="form-field"><span>目标发布日期</span><DatePickerField value={targetDate} onChange={setTargetDate} /></div>
             </div>
           </section>
           <section>
@@ -687,6 +911,18 @@ function SettingsModal({ state, setState, reminderRuntime, appGuardRuntime, onTe
             <h3 className="settings-subheading">网站名单（尚未接通）</h3>
             <label className="wide-label"><span>域名只会保存，当前版本不会修改网络</span><textarea value={draft.distractionSites.join(", ")} onChange={(event) => setDraft({ ...draft, distractionSites: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} /></label>
             <p className="settings-note"><ShieldCheck size={15} />临时解锁、结束专注或退出软件后，程序限制立即停止，不会遗留系统修改。</p>
+          </section>
+          <section className="software-update-section">
+            <div className="software-update-copy">
+              <span>软件更新</span>
+              <strong>当前版本 v{updateRuntime.currentVersion}</strong>
+              <small>{updateMessage}</small>
+            </div>
+            <div className={`runtime-state update-runtime ${updateRuntime.phase === "error" ? "warning" : "ready"}`}><ShieldCheck size={15} /><span>正式更新会验证签名，确认来源后才安装</span></div>
+            <button className="button secondary software-update-button" disabled={updateBusy || updateDeferred} onClick={onCheckUpdate}>
+              <RefreshCw className={updateRuntime.phase === "checking" ? "spinning" : ""} size={15} />
+              {updateDeferred ? "专注结束后提示" : updateRuntime.phase === "available" ? "查看更新" : updateRuntime.phase === "checking" ? "正在检查" : "检查更新"}
+            </button>
           </section>
         </div>
         <footer><button className="danger-link" onClick={onReset}>结束并重设当前项目</button><div><button className="button secondary" onClick={onClose}>取消</button><button className="button primary" onClick={save}>保存设置</button></div></footer>

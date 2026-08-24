@@ -29,12 +29,12 @@
 
 ## 3. 当前版本与技术架构
 
-当前版本：`0.4.1`。
+当前版本：`0.6.0`。
 
 - 前端：React 19 + TypeScript + Vite。
 - 桌面容器：Tauri 2。
 - 原生逻辑：Rust。
-- 本地状态：WebView2 localStorage，schemaVersion 3。
+- 本地状态：WebView2 localStorage，schemaVersion 4；兼容 v2/v3。
 - 应用标识：`com.sunday.frame`，不得修改，否则可能丢失用户现有数据。
 - Windows 构建：GitHub Actions，工作流 `.github/workflows/windows-build.yml`。
 - 安装格式：NSIS EXE。
@@ -49,7 +49,10 @@
 - `src/lib/native-reminders.ts`：Windows 通知桥接。
 - `src/lib/app-guard-policy.ts`：专注状态与程序保护策略。
 - `src/lib/native-app-guard.ts`：前端原生程序保护桥接。
-- `src-tauri/src/lib.rs`：托盘、自启、程序限制和运行应用查询。
+- `src/lib/subtitles.ts`：字幕类型、大小和文本规范化。
+- `src/lib/deepseek.ts`：前端到原生 DeepSeek 命令的窄桥接。
+- `src/lib/app-updater.ts`：版本读取、更新检查、下载进度、签名安装与重启桥接。
+- `src-tauri/src/lib.rs`：托盘、自启、程序限制、运行应用查询、Windows 凭据和 DeepSeek 请求。
 
 ## 4. 已完成功能
 
@@ -77,36 +80,58 @@
 - 对进程名做规范化、去重和系统关键进程保护。
 - 提供 5 秒安全测试和累计拦截次数。
 - v0.4.1 新增“从正在运行的软件添加”：原生端通过 PowerShell 读取有可见窗口的进程，前端支持刷新、多选、已添加标记和批量加入。
+- v0.4.2 为首次设置和设置页增加独立日历按钮与内置月历，不再依赖 Windows WebView 的原生日期弹窗。
+
+### DeepSeek 前三阶段梳理
+
+- “项目计划”页提供单一 AI 入口，不新增主导航。
+- 支持导入 `.srt` / `.txt`，本地预览编辑后由用户主动发起一次分析。
+- 固定使用 `deepseek-v4-flash` JSON Output，一次生成素材梳理、粗剪规划和视频大纲。
+- 三份结果与任务均可编辑；确认后只替换未完成的前三阶段任务。
+- API Key 保存在 Windows 凭据管理器，不进入 localStorage，也不会返回前端。
+- 字幕文件限制 3 MB、文本限制 300,000 字，首版不自动分块。
+
+### 签名自动更新
+
+- 启动后延迟检查一次公开 GitHub Release，无新版时不打扰。
+- 有新版时先询问，确认后显示真实下载进度、验证签名、安装并重启。
+- 专注中不弹更新窗口，结束专注后再提示。
+- 设置页可查看当前版本并手动检查。
+- 日常 push 只构建；`.github/workflows/windows-release.yml` 只允许手动发布正式 Release。
+- 公钥可提交；私钥和密码只能位于 GitHub Secrets 与用户单独备份。
 
 ## 5. 当前验证状态
 
 已确认：
 
 - `npm run lint` 通过。
-- `npm run test` 通过：4 个测试文件、12 项测试。
+- `npm run test` 通过：7 个测试文件、22 项测试。
 - `npm run build` 通过。
 - v0.4.0 GitHub Actions Windows NSIS 构建成功。
 - 用户在 Windows 真机确认 v0.4.0 的程序限制有效。
 
 尚未确认：
 
-- v0.4.1 的 `list_running_apps` Rust 命令尚未经过 GitHub Actions 编译。
-- v0.4.1 的运行程序选择器尚未在用户 Windows 电脑读取真实应用列表。
+- v0.4.2 的内置月历尚需在用户 Windows 电脑验证弹出、换月和选日交互。
 - 专注正式流程中的重开阻止、临时解锁到期自动恢复仍应做完整真机回归。
+- v0.5.0 尚需 GitHub Actions 验证 Windows 凭据接口、Rust 测试和 NSIS 构建，并用真实 DeepSeek Key 完成一次字幕调用。
+- v0.6.0 尚需 GitHub Actions 验证 updater/process Rust 插件、签名 NSIS 和 `latest.json`。
+- v0.6.0 必须先手动安装一次，再用更高版本验证完整应用内更新。
 
 ## 6. 接手后的第一项任务
 
-1. 检查仓库是否已经包含 v0.4.1 和本交接文档。
+1. 检查仓库是否已经包含 v0.6.0 和本交接文档。
 2. 检查未提交改动，先不要覆盖。
 3. 运行前端 lint、测试和构建。
 4. 运行 Rust 测试；若 Windows 本机缺少 Rust，则让 GitHub Actions 验证。
-5. 构建并安装 v0.4.1。
-6. 打开几个安全测试应用，在设置中点击“从正在运行的软件添加”，验证：
+5. 按 `docs/AUTO-UPDATE-RELEASE.md` 配置 Secrets，构建并手动安装 v0.6.0。
+6. 在项目计划页用短 SRT 验证：配置/清除密钥、预览不自动发送、一次分析、修改结果、生成任务。
+7. 打开几个安全测试应用，在设置中点击“从正在运行的软件添加”，验证：
    - 能显示窗口标题和 `.exe` 进程名；
    - 多选添加不重复；
    - 本软件与关键系统进程不出现；
    - 保存后 5 秒测试能关闭安全测试程序。
-7. 若失败，读取准确错误或日志后修复，不要猜测。
+8. 若失败，读取准确错误或日志后修复，不要猜测。
 
 建议用空白记事本作为关闭测试对象；先保存其他软件中的工作，避免数据丢失。
 
@@ -114,11 +139,10 @@
 
 按优先级：
 
-1. 完成 v0.4.1 Windows 真机验证并修复。
-2. 补齐程序限制正式专注流程的回归测试与错误提示。
-3. 评估网站限制；除非能安全恢复，否则继续后置。
-4. 接入 DeepSeek，仅生成前三阶段的梳理结果与每日任务，不让 AI 侵入第 4～7 阶段。
-5. 根据真实使用反馈调整每日任务密度、专注门槛和提醒强度。
+1. 完成 v0.6.0 Windows 签名构建与手动 Release。
+2. 发布一个更高测试版本，验证发现、下载、签名安装、重启和数据保留。
+3. 完成一次真实 DeepSeek 字幕调用。
+4. 补齐程序限制正式专注流程的回归测试与错误提示。
 
 ## 8. 明确不做
 
@@ -140,4 +164,4 @@ npm run build
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-然后通过 Git 提交并推送到 `main`。GitHub Actions 成功后，在任务页底部下载 `MickeyToolkit-Windows-EXE`，覆盖安装旧版。保持应用标识不变即可保留本地项目数据。
+然后通过 Git 提交并推送到 `main`。普通构建成功后，手动运行 **Publish Windows Release** 才会发布正式更新。首次安装 v0.6.0 仍需手动下载 EXE；此后可使用应用内更新。保持应用标识不变即可保留本地项目数据。

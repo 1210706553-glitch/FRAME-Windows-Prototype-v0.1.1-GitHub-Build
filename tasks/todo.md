@@ -146,3 +146,119 @@
 - [x] `tsc -b`
 - [x] `vite build`
 - [x] 生成可由 GitHub Desktop 应用的 v0.4.1 更新包
+
+## v0.4.2 Calendar date picker
+
+- [x] 首次设置增加独立日历按钮和内置月历
+- [x] 设置页复用相同日期选择组件
+- [x] 保留键盘输入、最早日期限制和无障碍标签
+- [ ] Windows 真机确认月历弹出、换月、选择和关闭交互
+
+## v0.5.0 DeepSeek subtitle planning
+
+### Task 12.1: State contract and migration
+
+**Acceptance criteria:**
+- [x] schema v4 可保存字幕草稿、来源文件名和三份可编辑结果
+- [x] v2/v3 项目加载后不丢失任务、进度、设置或记录
+
+**Verification:** TypeScript migration tests and production build.
+
+### Task 12.2: Subtitle ingestion
+
+**Acceptance criteria:**
+- [x] 仅接受 `.srt` 和 `.txt`，支持 UTF-8 BOM 并保留有用时间码
+- [x] 超过 3 MB 或 300,000 字符时在发送前明确阻止
+- [x] 导入后必须先显示可编辑预览，不自动调用 API
+
+**Verification:** Parser unit tests plus manual file selection.
+
+### Task 12.3: Secure DeepSeek adapter
+
+**Acceptance criteria:**
+- [x] API Key 由 Windows 凭据存储保存、读取和删除
+- [x] 原生端调用 `deepseek-v4-flash` JSON Output，一次返回三个部分
+- [x] 错误可恢复且不会泄露 API Key 或完整字幕
+
+**Verification:** Rust tests, GitHub Actions Windows build and masked-key UI check.
+
+### Checkpoint: Foundation
+
+- [ ] 前端与 Rust 测试通过
+- [x] 旧数据迁移通过
+- [x] 本地存储与日志中找不到 API Key
+
+### Task 12.4: Import and preview UI
+
+**Acceptance criteria:**
+- [x] 项目计划页提供一个清晰的“AI梳理前三阶段”入口
+- [x] 弹窗支持选择文件、预览、编辑、重新选择和字符数显示
+- [x] 未配置 API Key 时引导到同一弹窗内完成配置
+
+**Verification:** Desktop-width and narrow-width manual interaction.
+
+### Task 12.5: Editable analysis results
+
+**Acceptance criteria:**
+- [x] 一次请求得到素材梳理、粗剪规划和视频大纲三份结果
+- [x] 三份结果均可修改，失败时保留字幕草稿并可重试
+- [x] 分析按钮在请求期间禁用并显示明确进度
+
+**Verification:** Mock response tests and manual error recovery.
+
+### Task 12.6: Task generation and scheduling
+
+**Acceptance criteria:**
+- [x] 确认后只替换尚未完成的第1～3阶段任务
+- [x] 第4～7阶段、完成记录和专注状态保持不变
+- [x] 新任务按每日容量和休息日重新排期并立即反映进度
+
+**Verification:** Planner tests covering fresh and partially completed projects.
+
+### Checkpoint: End-to-end
+
+- [ ] SRT/TXT → 预览 → 一次分析 → 修改 → 每日任务完整走通
+- [x] AI 不参与第4～7阶段
+
+### Task 12.7: Release package
+
+- [x] 版本更新到 v0.5.0
+- [x] README、架构、交接文档和更新说明同步
+- [x] lint、Vitest、TypeScript、Vite build 通过
+- [x] 生成 GitHub Desktop 更新包
+
+### Task 12.8: Windows validation
+
+- [ ] GitHub Actions NSIS 构建通过
+- [ ] 真机凭据保存、删除和一次真实 DeepSeek 调用通过
+
+## v0.6.0 Signed automatic updates
+
+### Task 13.1: Signing and native updater
+
+- [x] 更新签名公钥写入 Tauri 配置
+- [x] 私钥和密码只存在单独交付文件与 GitHub Secrets
+- [x] updater/process 插件、权限和 NSIS 更新产物配置完成
+
+### Task 13.2: Update UX
+
+- [x] 启动延迟检查且无更新时不打扰
+- [x] 新版提示先询问，确认后才下载
+- [x] 下载显示真实进度，成功后安装并重启
+- [x] 专注中延迟提示，自动检查失败保持安静
+- [x] 设置页支持手动检查和明确状态
+
+### Task 13.3: GitHub release workflow
+
+- [x] 普通 push 只测试与构建，不创建 Release
+- [x] 手动工作流读取应用版本并发布 NSIS、签名和 latest.json
+- [x] 缺少签名 Secrets 时在构建前明确失败
+
+### Task 13.4: Release checkpoint
+
+- [x] `npm run lint`
+- [x] `npm run test`
+- [x] `npm run build`
+- [ ] `cargo test --manifest-path src-tauri/Cargo.toml`
+- [ ] GitHub Actions 普通构建与手动发布均通过
+- [ ] Windows 从旧版自动更新到 v0.6.0 且数据保留

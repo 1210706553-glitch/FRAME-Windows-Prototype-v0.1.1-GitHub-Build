@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { completionPercent, createTemplateTasks, isRestDay, plannedFinishDate, reflowPendingTasks, replanIncompleteTasks } from "./planner";
+import { completionPercent, createTemplateTasks, isRestDay, plannedFinishDate, reflowPendingTasks, replanIncompleteTasks, replacePendingAiPlanningTasks } from "./planner";
 
 describe("planner", () => {
   it("schedules two to five tasks per workday and skips the rest weekday", () => {
@@ -49,5 +49,25 @@ describe("planner", () => {
     expect(today).toHaveLength(4);
     expect(today.reduce((sum, task) => sum + task.estimateMinutes, 0)).toBe(150);
     expect(plannedFinishDate(repaired)).toBe("2026-08-31");
+  });
+
+  it("replaces only unfinished AI-stage tasks and keeps later stages", () => {
+    const tasks = createTemplateTasks("2026-08-24", 150, -1, 1);
+    tasks[0] = { ...tasks[0], status: "done" };
+    const completedId = tasks[0].id;
+    const laterIds = tasks.filter((task) => !["素材梳理", "粗剪", "大纲"].includes(task.stage)).map((task) => task.id);
+    const replaced = replacePendingAiPlanningTasks(tasks, [
+      { stage: "素材梳理", title: "梳理沙发事件链", note: "写清前因后果", estimateMinutes: 50 },
+      { stage: "粗剪", title: "完成沙发段粗剪", note: "笑点兑现即离开", estimateMinutes: 80 },
+      { stage: "大纲", title: "确定继承破屋入口", note: "路人一句话能懂", estimateMinutes: 35 },
+    ], "2026-08-24", 150, -1, 2);
+
+    expect(replaced.find((task) => task.id === completedId)?.status).toBe("done");
+    expect(laterIds.every((id) => replaced.some((task) => task.id === id))).toBe(true);
+    expect(replaced.filter((task) => task.id.startsWith("ai-task-")).map((task) => task.title)).toEqual([
+      "梳理沙发事件链",
+      "完成沙发段粗剪",
+      "确定继承破屋入口",
+    ]);
   });
 });

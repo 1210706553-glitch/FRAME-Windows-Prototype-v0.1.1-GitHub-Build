@@ -12,6 +12,29 @@ export type CreationStage = (typeof CREATION_STAGES)[number];
 export type TaskStatus = "todo" | "doing" | "done";
 export type FocusStatus = "idle" | "active" | "temporary-unlock";
 
+export type AiPlanningStage = "素材梳理" | "粗剪" | "大纲";
+
+export interface AiSuggestedTask {
+  stage: AiPlanningStage;
+  title: string;
+  note: string;
+  estimateMinutes: number;
+}
+
+export interface AiPlanningResult {
+  materialOrganization: string;
+  roughCutPlan: string;
+  videoOutline: string;
+  tasks: AiSuggestedTask[];
+}
+
+export interface ProjectAnalysis {
+  sourceFileName: string;
+  transcriptText: string;
+  result: AiPlanningResult;
+  analyzedAt: string;
+}
+
 export interface CreationTask {
   id: string;
   title: string;
@@ -35,6 +58,7 @@ export interface ProjectPlan {
   targetDate: string;
   createdAt: string;
   tasks: CreationTask[];
+  analysis?: ProjectAnalysis;
 }
 
 export interface UserPreferences {
@@ -67,7 +91,7 @@ export interface DailyRecord {
 }
 
 export interface AppState {
-  schemaVersion: 3;
+  schemaVersion: 4;
   project: ProjectPlan | null;
   preferences: UserPreferences;
   focus: FocusSession;
