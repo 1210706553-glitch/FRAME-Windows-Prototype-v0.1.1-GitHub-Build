@@ -1,6 +1,12 @@
 import { invoke } from "@tauri-apps/api/core";
 
 type NativeGuardSnapshot = [active: boolean, appCount: number, blockedAttempts: number, lastBlocked: string | null];
+type NativeRunningApplication = [processName: string, windowTitle: string];
+
+export interface RunningApplication {
+  processName: string;
+  windowTitle: string;
+}
 
 export interface AppGuardRuntimeStatus {
   native: boolean;
@@ -52,5 +58,17 @@ export async function readNativeAppGuard(appCount: number): Promise<AppGuardRunt
     return toRuntime(await invoke<NativeGuardSnapshot>("app_guard_status"));
   } catch (error) {
     return { native: true, active: false, appCount, blockedAttempts: 0, error: errorMessage(error) };
+  }
+}
+
+export async function listRunningApplications(): Promise<RunningApplication[]> {
+  if (!isTauriRuntime()) {
+    throw new Error("请在 Windows 桌面版中选择正在运行的软件");
+  }
+  try {
+    const applications = await invoke<NativeRunningApplication[]>("list_running_apps");
+    return applications.map(([processName, windowTitle]) => ({ processName, windowTitle }));
+  } catch (error) {
+    throw new Error(errorMessage(error));
   }
 }

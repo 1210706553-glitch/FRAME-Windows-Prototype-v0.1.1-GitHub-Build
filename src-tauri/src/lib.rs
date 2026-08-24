@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{BTreeMap, HashSet},
     process::{Command, Stdio},
     sync::{Arc, Mutex},
     thread,
@@ -96,6 +96,54 @@ fn normalize_process_names(values: Vec<String>) -> Vec<String> {
         .collect()
 }
 
+fn parse_visible_applications(output: &str) -> Vec<(String, String)> {
+    let mut applications = BTreeMap::new();
+    for line in output.lines() {
+        let line = line.trim_start_matches('\u{feff}').trim();
+        let Some((process_name, window_title)) = line.split_once('\t') else {
+            continue;
+        };
+        let Some(process_name) = normalize_process_name(process_name) else {
+            continue;
+        };
+        let window_title = window_title.trim();
+        let label = if window_title.is_empty() {
+            process_name.clone()
+        } else {
+            window_title.to_string()
+        };
+        applications.entry(process_name).or_insert(label);
+    }
+    applications.into_iter().collect()
+}
+
+#[cfg(target_os = "windows")]
+fn query_visible_applications() -> Result<Vec<(String, String)>, String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    const SCRIPT: &str = r#"[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.ProcessName } | ForEach-Object { '{0}`t{1}' -f $_.ProcessName, ($_.MainWindowTitle -replace '[\r\n\t]+',' ') }"#;
+    let output = Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", SCRIPT])
+        .creation_flags(CREATE_NO_WINDOW)
+        .stderr(Stdio::piped())
+        .output()
+        .map_err(|error| format!("Unable to read running applications: {error}"))?;
+    if !output.status.success() {
+        let error = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if error.is_empty() {
+            "Unable to read running applications".to_string()
+        } else {
+            error
+        });
+    }
+    Ok(parse_visible_applications(&String::from_utf8_lossy(&output.stdout)))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn query_visible_applications() -> Result<Vec<(String, String)>, String> {
+    Err("Running application selection is only available in the Windows desktop app".to_string())
+}
+
 #[cfg(target_os = "windows")]
 fn terminate_process(name: &str) -> bool {
     use std::os::windows::process::CommandExt;
@@ -185,6 +233,11 @@ fn app_guard_status(guard: State<'_, AppGuard>) -> GuardSnapshot {
     guard.snapshot()
 }
 
+#[tauri::command]
+fn list_running_apps() -> Result<Vec<(String, String)>, String> {
+    query_visible_applications()
+}
+
 fn show_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.unminimize();
@@ -200,7 +253,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             start_app_guard,
             stop_app_guard,
-            app_guard_status
+            app_guard_status,
+            list_running_apps
         ])
         .plugin(tauri_plugin_log::Builder::default().level(log::LevelFilter::Info).build())
         .plugin(tauri_plugin_notification::init())
@@ -254,7 +308,7 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_process_name, normalize_process_names};
+    use super::{normalize_process_name, normalize_process_names, parse_visible_applications};
 
     #[test]
     fn normalizes_safe_process_names() {
@@ -275,6 +329,18 @@ mod tests {
         assert_eq!(
             normalize_process_names(vec!["steam".into(), "STEAM.EXE".into(), "dota2".into()]),
             vec!["steam.exe".to_string(), "dota2.exe".to_string()]
+        );
+    }
+
+    #[test]
+    fn parses_visible_applications_and_filters_protected_processes() {
+        let output = "Steam\tSteam\r\nexplorer\tProgram Manager\r\nnotepad\tUntitled - Notepad\r\nSteam\tStore\r\n";
+        assert_eq!(
+            parse_visible_applications(output),
+            vec![
+                ("notepad.exe".to_string(), "Untitled - Notepad".to_string()),
+                ("steam.exe".to_string(), "Steam".to_string()),
+            ]
         );
     }
 }

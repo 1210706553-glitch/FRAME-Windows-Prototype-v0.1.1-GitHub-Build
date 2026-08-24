@@ -15,9 +15,11 @@ import {
   Gauge,
   ListChecks,
   LockKeyhole,
+  MonitorUp,
   Play,
   Power,
   Plus,
+  RefreshCw,
   Settings,
   ShieldCheck,
   Sparkles,
@@ -41,7 +43,8 @@ import {
 } from "./lib/planner";
 import { configureReminderRuntime, sendNativeReminder, type ReminderRuntimeStatus } from "./lib/native-reminders";
 import { shouldRunAppGuard } from "./lib/app-guard-policy";
-import { readNativeAppGuard, syncNativeAppGuard, type AppGuardRuntimeStatus } from "./lib/native-app-guard";
+import { listRunningApplications, readNativeAppGuard, syncNativeAppGuard, type AppGuardRuntimeStatus, type RunningApplication } from "./lib/native-app-guard";
+import { mergeApplicationNames } from "./lib/running-apps";
 import { evaluateReminder, type ReminderDecision } from "./lib/reminders";
 import {
   CREATION_STAGES,
@@ -607,11 +610,112 @@ function Onboarding({ onCreate }: { onCreate: (project: ProjectPlan, preferences
 function SettingsModal({ state, setState, reminderRuntime, appGuardRuntime, onTestReminder, onTestAppGuard, onClose, onReset }: { state: AppState; setState: React.Dispatch<React.SetStateAction<AppState>>; reminderRuntime: ReminderRuntimeStatus | null; appGuardRuntime: AppGuardRuntimeStatus | null; onTestReminder: () => void; onTestAppGuard: (apps: string[]) => void; onClose: () => void; onReset: () => void }) {
   const [draft, setDraft] = useState(state.preferences);
   const [targetDate, setTargetDate] = useState(state.project?.targetDate ?? todayKey);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerLoading, setPickerLoading] = useState(false);
+  const [pickerError, setPickerError] = useState("");
+  const [runningApps, setRunningApps] = useState<RunningApplication[]>([]);
+  const [selectedApps, setSelectedApps] = useState<string[]>([]);
+
   function save() {
     setState((current) => ({ ...current, preferences: draft, project: current.project ? { ...current.project, targetDate } : null }));
     onClose();
   }
-  return <div className="modal-backdrop" onMouseDown={onClose}><section className="modal settings-modal" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}><header><div><span>PERSONAL SETTINGS</span><h2>计划与软件设置</h2></div><button aria-label="关闭" onClick={onClose}><X size={18} /></button></header><div className="settings-sections"><section><h3>每日节奏</h3><div className="form-grid"><label><span>称呼</span><input value={draft.displayName} onChange={(event) => setDraft({ ...draft, displayName: event.target.value })} /></label><label><span>开始时间</span><input type="time" value={draft.dailyStartTime} onChange={(event) => setDraft({ ...draft, dailyStartTime: event.target.value })} /></label><label><span>每日投入</span><select value={draft.dailyMinutes} onChange={(event) => setDraft({ ...draft, dailyMinutes: Number(event.target.value) })}><option value={120}>2小时</option><option value={150}>2.5小时</option><option value={180}>3小时</option></select></label><label><span>每周休息安排</span><select value={draft.restWeekday} onChange={(event) => setDraft({ ...draft, restWeekday: Number(event.target.value) })}><option value={-1}>动态休息（推荐）</option>{weekdays.map((day, index) => <option key={day} value={index}>固定{day}</option>)}</select></label><label><span>目标发布日期</span><input type="date" value={targetDate} onChange={(event) => setTargetDate(event.target.value)} /></label></div></section><section><h3>督促提醒</h3><label className="toggle-row"><input type="checkbox" checked={draft.reminderEnabled} onChange={(event) => setDraft({ ...draft, reminderEnabled: event.target.checked })} /><span><BellRing size={17} /><strong>每天按设置时间督促</strong><small>到点、15分钟未开始、之后每30分钟</small></span><i /></label><label className={`toggle-row ${!draft.reminderEnabled ? "disabled" : ""}`}><input type="checkbox" disabled={!draft.reminderEnabled} checked={draft.launchAtStartup} onChange={(event) => setDraft({ ...draft, launchAtStartup: event.target.checked })} /><span><Power size={17} /><strong>开机后在后台待命</strong><small>关闭窗口后仍保留在系统托盘</small></span><i /></label><div className={`runtime-state ${reminderRuntime?.native && reminderRuntime.permissionGranted ? "ready" : "warning"}`}><CircleDot size={14} /><span>{!reminderRuntime ? "保存后检查Windows提醒状态" : !reminderRuntime.native ? "浏览器预览不发送Windows通知" : reminderRuntime.permissionGranted ? `Windows通知已就绪${reminderRuntime.launchAtStartup ? " · 开机自启已开启" : ""}` : "Windows通知权限未开启，请在系统设置中允许"}</span></div><button className="test-reminder" disabled={!draft.reminderEnabled} onClick={onTestReminder}><BellRing size={14} />发送一条测试提醒</button><h3 className="settings-subheading">应用程序限制</h3><label className="wide-label"><span>进程名，用逗号分隔，例如 steam.exe、dota2.exe</span><textarea value={draft.distractionApps.join(", ")} onChange={(event) => setDraft({ ...draft, distractionApps: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} /></label><div className={`runtime-state ${appGuardRuntime?.native && !appGuardRuntime.error ? "ready" : "warning"}`}><ShieldCheck size={15} /><span>{!appGuardRuntime ? "保存后检查程序保护状态" : !appGuardRuntime.native ? "浏览器预览未接通程序限制" : appGuardRuntime.error ? `程序保护不可用：${appGuardRuntime.error}` : appGuardRuntime.active ? `程序保护运行中 · 已拦截${appGuardRuntime.blockedAttempts}次` : "程序保护已接通，开始专注后自动启用"}</span></div><button className="test-reminder" disabled={!draft.distractionApps.length || appGuardRuntime?.active} onClick={() => onTestAppGuard(draft.distractionApps)}><ShieldCheck size={14} />测试程序限制5秒</button><h3 className="settings-subheading">网站名单（尚未接通）</h3><label className="wide-label"><span>域名只会保存，当前版本不会修改网络</span><textarea value={draft.distractionSites.join(", ")} onChange={(event) => setDraft({ ...draft, distractionSites: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} /></label><p className="settings-note"><ShieldCheck size={15} />临时解锁、结束专注或退出软件后，程序限制立即停止，不会遗留系统修改。</p></section></div><footer><button className="danger-link" onClick={onReset}>结束并重设当前项目</button><div><button className="button secondary" onClick={onClose}>取消</button><button className="button primary" onClick={save}>保存设置</button></div></footer></section></div>;
+
+  async function refreshRunningApps() {
+    setPickerLoading(true);
+    setPickerError("");
+    try {
+      setRunningApps(await listRunningApplications());
+    } catch (error) {
+      setRunningApps([]);
+      setPickerError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setPickerLoading(false);
+    }
+  }
+
+  function openPicker() {
+    setPickerOpen(true);
+    setSelectedApps([]);
+    void refreshRunningApps();
+  }
+
+  function toggleSelected(processName: string) {
+    setSelectedApps((current) => current.includes(processName)
+      ? current.filter((name) => name !== processName)
+      : [...current, processName]);
+  }
+
+  function addSelectedApplications() {
+    setDraft((current) => ({
+      ...current,
+      distractionApps: mergeApplicationNames(current.distractionApps, selectedApps),
+    }));
+    setPickerOpen(false);
+    setSelectedApps([]);
+  }
+
+  const configuredApps = new Set(draft.distractionApps.map((name) => name.trim().toLowerCase()));
+
+  return <>
+    <div className="modal-backdrop" onMouseDown={onClose}>
+      <section className="modal settings-modal" role="dialog" aria-modal="true" onMouseDown={(event) => event.stopPropagation()}>
+        <header><div><span>PERSONAL SETTINGS</span><h2>计划与软件设置</h2></div><button aria-label="关闭" onClick={onClose}><X size={18} /></button></header>
+        <div className="settings-sections">
+          <section>
+            <h3>每日节奏</h3>
+            <div className="form-grid">
+              <label><span>称呼</span><input value={draft.displayName} onChange={(event) => setDraft({ ...draft, displayName: event.target.value })} /></label>
+              <label><span>开始时间</span><input type="time" value={draft.dailyStartTime} onChange={(event) => setDraft({ ...draft, dailyStartTime: event.target.value })} /></label>
+              <label><span>每日投入</span><select value={draft.dailyMinutes} onChange={(event) => setDraft({ ...draft, dailyMinutes: Number(event.target.value) })}><option value={120}>2小时</option><option value={150}>2.5小时</option><option value={180}>3小时</option></select></label>
+              <label><span>每周休息安排</span><select value={draft.restWeekday} onChange={(event) => setDraft({ ...draft, restWeekday: Number(event.target.value) })}><option value={-1}>动态休息（推荐）</option>{weekdays.map((day, index) => <option key={day} value={index}>固定{day}</option>)}</select></label>
+              <label><span>目标发布日期</span><input type="date" value={targetDate} onChange={(event) => setTargetDate(event.target.value)} /></label>
+            </div>
+          </section>
+          <section>
+            <h3>督促提醒</h3>
+            <label className="toggle-row"><input type="checkbox" checked={draft.reminderEnabled} onChange={(event) => setDraft({ ...draft, reminderEnabled: event.target.checked })} /><span><BellRing size={17} /><strong>每天按设置时间督促</strong><small>到点、15分钟未开始、之后每30分钟</small></span><i /></label>
+            <label className={`toggle-row ${!draft.reminderEnabled ? "disabled" : ""}`}><input type="checkbox" disabled={!draft.reminderEnabled} checked={draft.launchAtStartup} onChange={(event) => setDraft({ ...draft, launchAtStartup: event.target.checked })} /><span><Power size={17} /><strong>开机后在后台待命</strong><small>关闭窗口后仍保留在系统托盘</small></span><i /></label>
+            <div className={`runtime-state ${reminderRuntime?.native && reminderRuntime.permissionGranted ? "ready" : "warning"}`}><CircleDot size={14} /><span>{!reminderRuntime ? "保存后检查Windows提醒状态" : !reminderRuntime.native ? "浏览器预览不发送Windows通知" : reminderRuntime.permissionGranted ? `Windows通知已就绪${reminderRuntime.launchAtStartup ? " · 开机自启已开启" : ""}` : "Windows通知权限未开启，请在系统设置中允许"}</span></div>
+            <button className="test-reminder" disabled={!draft.reminderEnabled} onClick={onTestReminder}><BellRing size={14} />发送一条测试提醒</button>
+
+            <div className="settings-heading-row"><h3 className="settings-subheading">应用程序限制</h3><button className="app-picker-trigger" onClick={openPicker}><MonitorUp size={14} />从正在运行的软件添加</button></div>
+            <label className="wide-label"><span>已限制的程序；仍可手动编辑进程名</span><textarea value={draft.distractionApps.join(", ")} onChange={(event) => setDraft({ ...draft, distractionApps: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} /></label>
+            <div className={`runtime-state ${appGuardRuntime?.native && !appGuardRuntime.error ? "ready" : "warning"}`}><ShieldCheck size={15} /><span>{!appGuardRuntime ? "保存后检查程序保护状态" : !appGuardRuntime.native ? "浏览器预览未接通程序限制" : appGuardRuntime.error ? `程序保护不可用：${appGuardRuntime.error}` : appGuardRuntime.active ? `程序保护运行中 · 已拦截${appGuardRuntime.blockedAttempts}次` : "程序保护已接通，开始专注后自动启用"}</span></div>
+            <button className="test-reminder" disabled={!draft.distractionApps.length || appGuardRuntime?.active} onClick={() => onTestAppGuard(draft.distractionApps)}><ShieldCheck size={14} />测试程序限制5秒</button>
+
+            <h3 className="settings-subheading">网站名单（尚未接通）</h3>
+            <label className="wide-label"><span>域名只会保存，当前版本不会修改网络</span><textarea value={draft.distractionSites.join(", ")} onChange={(event) => setDraft({ ...draft, distractionSites: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} /></label>
+            <p className="settings-note"><ShieldCheck size={15} />临时解锁、结束专注或退出软件后，程序限制立即停止，不会遗留系统修改。</p>
+          </section>
+        </div>
+        <footer><button className="danger-link" onClick={onReset}>结束并重设当前项目</button><div><button className="button secondary" onClick={onClose}>取消</button><button className="button primary" onClick={save}>保存设置</button></div></footer>
+      </section>
+    </div>
+
+    {pickerOpen && <div className="modal-backdrop app-picker-backdrop" onMouseDown={() => setPickerOpen(false)}>
+      <section className="modal app-picker-modal" role="dialog" aria-modal="true" aria-labelledby="app-picker-title" onMouseDown={(event) => event.stopPropagation()}>
+        <header><div><span>RUNNING APPLICATIONS</span><h2 id="app-picker-title">选择要限制的软件</h2></div><button aria-label="关闭" onClick={() => setPickerOpen(false)}><X size={18} /></button></header>
+        <div className="app-picker-body">
+          <div className="app-picker-toolbar"><p>请先打开游戏或视频软件，再在这里勾选。系统程序已自动过滤。</p><button onClick={() => void refreshRunningApps()} disabled={pickerLoading}><RefreshCw className={pickerLoading ? "spinning" : ""} size={14} />刷新</button></div>
+          {pickerLoading ? <div className="app-picker-state"><RefreshCw className="spinning" size={21} /><span>正在读取运行中的软件…</span></div>
+            : pickerError ? <div className="app-picker-state error"><span>{pickerError}</span><button onClick={() => void refreshRunningApps()}>重新读取</button></div>
+              : runningApps.length === 0 ? <div className="app-picker-state"><MonitorUp size={22} /><span>没有找到带窗口的运行程序，请先打开要限制的软件。</span></div>
+                : <div className="running-app-list">{runningApps.map((application) => {
+                  const alreadyAdded = configuredApps.has(application.processName.toLowerCase());
+                  const checked = alreadyAdded || selectedApps.includes(application.processName);
+                  return <label key={application.processName} className={alreadyAdded ? "already-added" : ""}>
+                    <input type="checkbox" checked={checked} disabled={alreadyAdded} onChange={() => toggleSelected(application.processName)} />
+                    <span className="running-app-icon"><MonitorUp size={16} /></span>
+                    <span><strong>{application.windowTitle}</strong><small>{application.processName}</small></span>
+                    {alreadyAdded && <em>已添加</em>}
+                  </label>;
+                })}</div>}
+        </div>
+        <footer><span>已选择 {selectedApps.length} 个</span><div><button className="button secondary" onClick={() => setPickerOpen(false)}>取消</button><button className="button primary" disabled={!selectedApps.length} onClick={addSelectedApplications}>添加到限制名单</button></div></footer>
+      </section>
+    </div>}
+  </>;
 }
 
 function ReasonModal({ title, description, reason, setReason, confirm, onConfirm, onClose }: { title: string; description: string; reason: string; setReason: (value: string) => void; confirm: string; onConfirm: () => void; onClose: () => void }) {

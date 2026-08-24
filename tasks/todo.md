@@ -118,4 +118,31 @@
 - [x] `vitest run`
 - [x] `tsc -b`
 - [x] `vite build`
-- [ ] GitHub Actions Windows installer
+- [x] GitHub Actions Windows installer
+
+## v0.4.1 Running application picker
+
+### Task 8.6: Native visible-application query
+
+**Acceptance criteria:**
+- [x] 只返回拥有可见窗口且进程名通过安全规范化的应用
+- [x] 返回进程名和窗口标题，并去重排序
+
+**Verification:** Rust parser tests and GitHub Actions Windows test.
+
+### Task 8.7: Application selection dialog
+
+**Acceptance criteria:**
+- [x] 设置页提供“从正在运行的软件添加”按钮
+- [x] 弹窗支持刷新、多选、已添加标记和批量添加
+- [x] 原有手动输入仍可作为兜底
+
+**Verification:** TypeScript build and manual Windows selection flow.
+
+### Task 8.8: Release checkpoint
+
+- [x] `vitest run`
+- [x] `oxlint`
+- [x] `tsc -b`
+- [x] `vite build`
+- [x] 生成可由 GitHub Desktop 应用的 v0.4.1 更新包

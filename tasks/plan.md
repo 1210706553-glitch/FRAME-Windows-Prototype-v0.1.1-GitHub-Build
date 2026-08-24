@@ -81,7 +81,7 @@
 - [x] Task 8.2: 暴露启动、停止、状态查询三个窄 Tauri 命令
 - [x] Task 8.3: 前端根据专注、临时解锁和结束状态自动同步原生保护
 - [x] Task 8.4: 将界面改为真实显示“未接通、待命、进行中”和拦截次数
-- [ ] Task 8.5: 完成前端测试、构建检查和 GitHub Windows 构建包
+- [x] Task 8.5: 完成前端测试、构建检查和 GitHub Windows 构建包
 
 ### Acceptance criteria
 
@@ -94,5 +94,26 @@
 ### Checkpoint
 
 - [x] 前端 lint、TypeScript、Vitest、Vite build 全部通过
-- [ ] GitHub Actions Windows NSIS 构建通过
+- [x] GitHub Actions Windows NSIS 构建通过
 - [ ] Windows 真机用一个无风险测试程序验证启动、重开、解锁和结束
+
+## v0.4.1 Running Application Picker
+
+### Architecture decisions
+
+- “添加程序”只列出当前拥有可见窗口的应用，避免向用户暴露大量后台进程。
+- 原生端返回窗口标题与规范化后的 `.exe` 进程名；系统关键进程和本软件继续复用既有拒绝名单。
+- 选择器支持刷新、多选、去重和已添加标记；保存仍写入既有 `distractionApps`，不改变专注保护协议。
+
+### Task list
+
+- [x] Task 8.6: 增加 Windows 当前可见应用查询命令与解析测试
+- [x] Task 8.7: 增加运行中应用选择弹窗并写回程序限制名单
+- [x] Task 8.8: 完成测试、生产构建和 GitHub 更新包
+
+### Acceptance criteria
+
+- [ ] 点击“添加程序”可看到当前正在运行且有窗口的软件
+- [ ] 可一次勾选多个程序，重复项不会再次加入
+- [ ] 本软件、系统关键进程和无效进程名不会出现在候选列表
+- [ ] 查询失败时显示明确错误，同时保留原有手动编辑能力

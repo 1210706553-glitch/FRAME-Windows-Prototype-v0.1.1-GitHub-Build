@@ -296,6 +296,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .settings-sections > section { padding: 20px; background: #121925; }
 .settings-sections h3 { margin: 0; font-size: 13px; }
 .settings-subheading { margin-top: 22px !important; padding-top: 18px; border-top: 1px solid var(--border); }
+.settings-heading-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; margin-top: 22px; padding-top: 18px; border-top: 1px solid var(--border); }
+.settings-heading-row .settings-subheading { margin: 0 !important; border: 0; padding: 0; }
+.app-picker-trigger { min-height: 30px; display: inline-flex; align-items: center; gap: 6px; border: 1px solid rgba(124, 106, 242, 0.34); border-radius: 8px; padding: 0 9px; color: #d4ceff; background: var(--violet-soft); font-size: 8px; white-space: nowrap; }
+.app-picker-trigger:hover { border-color: rgba(155, 140, 248, 0.7); background: rgba(124, 106, 242, 0.2); }
 .settings-sections .form-grid { grid-template-columns: 1fr; margin-top: 17px; }
 .toggle-row { position: relative; min-height: 58px; display: flex; align-items: center; gap: 10px; margin-top: 12px; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; color: var(--text-2); background: rgba(255, 255, 255, 0.018); cursor: pointer; }
 .toggle-row.disabled { opacity: 0.5; cursor: not-allowed; }
@@ -326,6 +330,31 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .reason-body p { margin: 0 0 17px; color: var(--text-3); font-size: 10px; line-height: 1.7; }
 .reason-body textarea { min-height: 110px; }
 .reason-modal footer { justify-content: flex-end; }
+
+.app-picker-backdrop { z-index: 120; background: rgba(2, 5, 9, 0.82); }
+.app-picker-modal { width: min(620px, 100%); overflow: hidden; }
+.app-picker-body { padding: 16px 18px 18px; }
+.app-picker-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.app-picker-toolbar p { margin: 0; color: var(--text-3); font-size: 9px; line-height: 1.55; }
+.app-picker-toolbar button, .app-picker-state button { min-height: 31px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: none; border: 1px solid var(--border); border-radius: 8px; padding: 0 10px; color: var(--text-2); background: var(--surface-2); font-size: 8px; }
+.app-picker-toolbar button:hover, .app-picker-state button:hover { color: white; border-color: rgba(124, 106, 242, 0.5); }
+.app-picker-state { min-height: 210px; display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 10px; margin-top: 14px; border: 1px dashed var(--border); border-radius: 11px; color: var(--text-3); font-size: 9px; text-align: center; }
+.app-picker-state.error { color: var(--red); }
+.running-app-list { max-height: 340px; display: grid; gap: 7px; margin-top: 14px; overflow-y: auto; padding-right: 4px; }
+.running-app-list label { min-height: 52px; display: grid; grid-template-columns: 18px 34px minmax(0, 1fr) auto; gap: 9px; align-items: center; border: 1px solid var(--border); border-radius: 10px; padding: 8px 11px; background: rgba(255, 255, 255, 0.018); cursor: pointer; }
+.running-app-list label:hover { border-color: rgba(124, 106, 242, 0.42); background: rgba(124, 106, 242, 0.07); }
+.running-app-list label:has(input:checked) { border-color: rgba(124, 106, 242, 0.48); background: var(--violet-soft); }
+.running-app-list label.already-added { opacity: 0.58; cursor: default; }
+.running-app-list input { width: 15px; height: 15px; accent-color: var(--violet); }
+.running-app-icon { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 8px; color: var(--violet-2); background: rgba(124, 106, 242, 0.12); }
+.running-app-list label > span:nth-of-type(2) { min-width: 0; }
+.running-app-list strong, .running-app-list small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.running-app-list strong { color: var(--text); font-size: 10px; }
+.running-app-list small { margin-top: 4px; color: var(--text-3); font-size: 8px; }
+.running-app-list em { border-radius: 99px; padding: 4px 7px; color: var(--green); background: var(--green-soft); font-size: 7px; font-style: normal; }
+.app-picker-modal > footer > span { color: var(--text-3); font-size: 9px; }
+.spinning { animation: spin 800ms linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
 
 .reminder-toast { position: fixed; right: 22px; bottom: 22px; z-index: 80; width: min(410px, calc(100vw - 44px)); min-height: 82px; display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 10px; align-items: center; border: 1px solid rgba(124, 106, 242, 0.38); border-radius: 14px; padding: 13px; color: var(--text); background: rgba(18, 25, 38, 0.98); box-shadow: 0 20px 70px rgba(0, 0, 0, 0.45); text-align: left; }
 .reminder-toast > svg { width: 34px; height: 34px; border-radius: 10px; padding: 8px; color: #d4ceff; background: var(--violet-soft); }
@@ -387,6 +416,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   .onboarding { padding: 15px; }
   .onboarding-card form { padding: 24px 18px; }
   .reminder-toast { right: 12px; bottom: 70px; width: calc(100vw - 24px); }
+  .settings-heading-row, .app-picker-toolbar { align-items: stretch; flex-direction: column; }
+  .app-picker-trigger { justify-content: center; }
 }
 
 @media (prefers-reduced-motion: reduce) {

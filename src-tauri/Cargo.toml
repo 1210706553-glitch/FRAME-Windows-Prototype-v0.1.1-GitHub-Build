@@ -1,6 +1,6 @@
 [package]
 name = "mickey-toolkit"
-version = "0.4.0"
+version = "0.4.1"
 description = "Windows desktop focus and planning toolkit for video creators"
 authors = ["Sunday"]
 license = ""
