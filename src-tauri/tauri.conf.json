@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "视频创作工作台",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "identifier": "com.sunday.frame",
   "build": {
     "frontendDist": "../dist",
@@ -26,7 +26,10 @@
       "csp": "default-src 'self' asset: http://asset.localhost; img-src 'self' asset: http://asset.localhost blob: data:; media-src 'self' asset: http://asset.localhost blob: data:; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost https://api.openai.com",
       "assetProtocol": {
         "enable": true,
-        "scope": ["$VIDEO/**", "$DOCUMENT/**", "$DOWNLOAD/**"]
+        "scope": {
+          "requireLiteralLeadingDot": true,
+          "allow": ["**/*"]
+        }
       }
     }
   },

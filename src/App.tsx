@@ -3,7 +3,7 @@ import { Bot, Check, ChevronDown, ChevronRight, CircleHelp, Clock3, FileText, Fi
 import "./App.css";
 import { apiKeyExists, chooseVideo, chooseXmlDestination, desktopMediaUrl, exportPremiereXml, initialiseDatabase, probeMedia, runningInDesktop, saveApiKey, saveProject } from "./lib/desktop";
 import { clampTime, formatTime } from "./lib/time";
-import type { AppSettings, MaterialNode, MaterialNodeKind, MediaItem, Project, ProjectStage } from "./types";
+import type { AppSettings, MaterialNode, MaterialNodeKind, MediaItem, MediaProbe, Project, ProjectStage } from "./types";
 
 const stages: ProjectStage[] = ["素材整理", "方向发散", "主线设计", "大纲", "脚本", "审阅"];
 const nodeKinds: MaterialNodeKind[] = ["笑点", "信息", "情绪", "过场", "删除候选"];
@@ -45,6 +45,9 @@ function App() {
   const [newProjectGame, setNewProjectGame] = useState("");
   const [apiKeyDraft, setApiKeyDraft] = useState("");
   const [addingNode, setAddingNode] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [videoError, setVideoError] = useState<string | null>(null);
+  const [videoReloadKey, setVideoReloadKey] = useState(0);
   const videoRef = useRef<HTMLVideoElement>(null);
   const browserFileRef = useRef<HTMLInputElement>(null);
 
@@ -61,17 +64,25 @@ function App() {
   }, []);
 
   async function addDesktopVideo() {
+    if (importing) return;
     try {
       if (!runningInDesktop()) { browserFileRef.current?.click(); return; }
       const path = await chooseVideo(); if (!path) return;
+      setImporting(true);
+      setVideoError(null);
+      setStatus("正在安全读取视频信息…");
       const id = crypto.randomUUID();
-      const pending: MediaItem = { id, projectId: activeProject.id, name: fileNameFromPath(path), path, previewUrl: desktopMediaUrl(path), duration: 0, status: "probing" };
-      setMedia((items) => [...items, pending]); setActiveMediaId(id); setStatus("正在读取视频信息…");
-      const info = await probeMedia(path);
-      setMedia((items) => items.map((item) => item.id === id ? { ...item, ...info, status: "ready" } : item));
+      let info: MediaProbe | null = null;
+      let probeWarning = "";
+      try { info = await probeMedia(path); }
+      catch (error) { probeWarning = error instanceof Error ? error.message : String(error); }
+      const item: MediaItem = { id, projectId: activeProject.id, name: fileNameFromPath(path), path, previewUrl: desktopMediaUrl(path), duration: info?.duration ?? 0, width: info?.width, height: info?.height, fps: info?.fps, size: info?.size, status: "ready" };
+      setMedia((items) => [...items, item]);
+      setActiveMediaId(id);
       setProjects((items) => items.map((project) => project.id === activeProject.id ? { ...project, mediaCount: project.mediaCount + 1, updatedAt: "刚刚" } : project));
-      setStatus("视频已导入，可以开始本地转写");
+      setStatus(probeWarning ? "视频已导入；未检测到FFprobe，将由播放器读取时长" : "视频已导入，可以开始标记素材");
     } catch (error) { setStatus(`导入失败：${error instanceof Error ? error.message : "无法读取视频"}`); }
+    finally { setImporting(false); }
   }
 
   function addBrowserVideo(file?: File) {
@@ -89,6 +100,7 @@ function App() {
     setActiveMediaId(media.find((item) => item.projectId === projectId)?.id ?? null);
     setCurrentTime(0);
     setPlaying(false);
+    setVideoError(null);
   }
   function createProject() {
     if (!newProjectName.trim()) return;
@@ -133,14 +145,14 @@ function App() {
     </aside>
 
     <main className="workspace">
-      <section className="workspace-header"><div><div className="eyebrow">LOCAL PROJECT</div><div className="headline"><h1>{activeProject?.name}</h1><span><i/>单机项目</span></div><p>{activeProject?.game} · 先把素材变成可用节点，再进入主线、大纲和脚本。</p></div><div className="header-actions"><button className="secondary" onClick={() => setSettingsOpen(true)}><Settings size={15}/>模型设置</button><button className="primary" onClick={addDesktopVideo}><Import size={16}/>导入视频</button></div></section>
+      <section className="workspace-header"><div><div className="eyebrow">LOCAL PROJECT</div><div className="headline"><h1>{activeProject?.name}</h1><span><i/>单机项目</span></div><p>{activeProject?.game} · 先把素材变成可用节点，再进入主线、大纲和脚本。</p></div><div className="header-actions"><button className="secondary" onClick={() => setSettingsOpen(true)}><Settings size={15}/>模型设置</button><button className="primary" disabled={importing} onClick={addDesktopVideo}><Import size={16}/>{importing ? "读取中…" : "导入视频"}</button></div></section>
       <section className="stage-bar" aria-label="创作阶段">{stages.map((stage, index) => <button key={stage} className={index === 0 ? "active" : ""}><span>{index === 0 ? <Play size={10}/> : index + 1}</span><b>{stage}</b>{index < stages.length - 1 && <i/>}</button>)}</section>
 
       <section className="media-workspace">
-        <aside className="media-bin"><div className="panel-heading"><div><b>项目素材</b><span>{projectMedia.length} 个视频</span></div><button aria-label="导入视频" onClick={addDesktopVideo}><Plus size={15}/></button></div><div className="media-list">{projectMedia.length === 0 ? <div className="mini-empty"><Library size={22}/><b>还没有素材</b><p>导入本机视频后，这里会显示时长、分辨率和转写状态。</p><button onClick={addDesktopVideo}>选择视频</button></div> : projectMedia.map((item) => <button key={item.id} className={`media-row ${item.id === activeMediaId ? "active" : ""}`} onClick={() => setActiveMediaId(item.id)}><span className="media-thumbnail"><Film size={16}/></span><span><b>{item.name}</b><small>{item.duration ? formatTime(item.duration) : "等待读取"} · {item.width && item.height ? `${item.width}×${item.height}` : "本地视频"}</small><i className={item.status}>{item.status === "probing" ? "读取中" : item.status === "ready" ? "可分析" : item.status === "transcribing" ? "转写中" : "需检查"}</i></span></button>)}</div><div className="analysis-card"><div><WandSparkles size={15}/><b>本地分析流程</b></div><ol><li className={activeMedia ? "done" : "active"}>读取视频与音轨</li><li className={activeMedia ? "active" : ""}>本地语音转写</li><li>生成事件与高能节点</li><li>人工确认后进入大纲</li></ol></div></aside>
+        <aside className="media-bin"><div className="panel-heading"><div><b>项目素材</b><span>{projectMedia.length} 个视频</span></div><button aria-label="导入视频" disabled={importing} onClick={addDesktopVideo}><Plus size={15}/></button></div><div className="media-list">{projectMedia.length === 0 ? <div className="mini-empty"><Library size={22}/><b>还没有素材</b><p>导入本机视频后，这里会显示时长、分辨率和转写状态。</p><button disabled={importing} onClick={addDesktopVideo}>{importing ? "读取中…" : "选择视频"}</button></div> : projectMedia.map((item) => <button key={item.id} className={`media-row ${item.id === activeMediaId ? "active" : ""}`} onClick={() => { setActiveMediaId(item.id); setVideoError(null); }}><span className="media-thumbnail"><Film size={16}/></span><span><b>{item.name}</b><small>{item.duration ? formatTime(item.duration) : "等待读取"} · {item.width && item.height ? `${item.width}×${item.height}` : "本地视频"}</small><i className={item.status}>{item.status === "probing" ? "读取中" : item.status === "ready" ? "可分析" : item.status === "transcribing" ? "转写中" : "需检查"}</i></span></button>)}</div><div className="analysis-card"><div><WandSparkles size={15}/><b>本地分析流程</b></div><ol><li className={activeMedia ? "done" : "active"}>读取视频与音轨</li><li className={activeMedia ? "active" : ""}>本地语音转写</li><li>生成事件与高能节点</li><li>人工确认后进入大纲</li></ol></div></aside>
 
         <section className="player-column">
-          <div className="player-card"><div className="player-title"><div><span className="pulse-dot"/><b>{activeMedia?.name ?? "视频预览"}</b></div><span>{activeMedia ? `${activeMedia.width ?? "—"}×${activeMedia.height ?? "—"} · ${activeMedia.fps ?? "—"}fps` : "等待导入本地视频"}</span></div><div className={`video-frame ${activeMedia ? "has-video" : ""}`}>{activeMedia ? <video ref={videoRef} src={activeMedia.previewUrl} onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onLoadedMetadata={(event) => setMedia((items) => items.map((item) => item.id === activeMedia.id ? { ...item, duration: event.currentTarget.duration || item.duration } : item))}/> : <div className="video-empty"><span className="video-empty-icon"><Film size={28}/></span><h2>把原始素材导进来</h2><p>软件会在本机读取视频、提取音轨，并生成带时间码的转写结果。</p><button onClick={addDesktopVideo}><Import size={15}/>导入第一个视频</button></div>}</div><div className="transport"><button aria-label="后退五秒" onClick={() => seekTo(currentTime - 5)}><SkipBack size={17}/></button><button className="play-button" aria-label={playing ? "暂停" : "播放"} onClick={togglePlayback}>{playing ? <Pause size={17}/> : <Play size={17}/>}</button><button aria-label="前进五秒" onClick={() => seekTo(currentTime + 5)}><SkipForward size={17}/></button><strong>{formatTime(currentTime)} <span>/ {formatTime(duration)}</span></strong><input aria-label="播放进度" type="range" min="0" max={Math.max(duration, 1)} step="0.04" value={Math.min(currentTime, Math.max(duration, 1))} onChange={(event) => seekTo(Number(event.target.value))}/><button className="speed">1.0×</button></div></div>
+          <div className="player-card"><div className="player-title"><div><span className="pulse-dot"/><b>{activeMedia?.name ?? "视频预览"}</b></div><span>{activeMedia ? `${activeMedia.width ?? "—"}×${activeMedia.height ?? "—"} · ${activeMedia.fps ?? "—"}fps` : "等待导入本地视频"}</span></div><div className={`video-frame ${activeMedia ? "has-video" : ""}`}>{activeMedia && !videoError ? <video key={`${activeMedia.id}-${videoReloadKey}`} ref={videoRef} src={activeMedia.previewUrl} preload="metadata" playsInline onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)} onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)} onError={() => { setPlaying(false); setVideoError("当前视频无法由系统播放器解码"); setStatus("预览失败：请确认视频编码或本地路径权限"); }} onLoadedMetadata={(event) => setMedia((items) => items.map((item) => item.id === activeMedia.id ? { ...item, duration: event.currentTarget.duration || item.duration } : item))}/> : activeMedia && videoError ? <div className="video-empty"><span className="video-empty-icon"><Film size={28}/></span><h2>视频预览加载失败</h2><p>{videoError}。素材不会丢失，你仍可重新加载或更换视频。</p><button onClick={() => { setVideoError(null); setVideoReloadKey((value) => value + 1); }}><Play size={15}/>重新加载预览</button></div> : <div className="video-empty"><span className="video-empty-icon"><Film size={28}/></span><h2>把原始素材导进来</h2><p>软件会在本机读取视频、提取音轨，并生成带时间码的转写结果。</p><button disabled={importing} onClick={addDesktopVideo}><Import size={15}/>{importing ? "正在读取…" : "导入第一个视频"}</button></div>}</div><div className="transport"><button aria-label="后退五秒" onClick={() => seekTo(currentTime - 5)}><SkipBack size={17}/></button><button className="play-button" aria-label={playing ? "暂停" : "播放"} onClick={togglePlayback}>{playing ? <Pause size={17}/> : <Play size={17}/>}</button><button aria-label="前进五秒" onClick={() => seekTo(currentTime + 5)}><SkipForward size={17}/></button><strong>{formatTime(currentTime)} <span>/ {formatTime(duration)}</span></strong><input aria-label="播放进度" type="range" min="0" max={Math.max(duration, 1)} step="0.04" value={Math.min(currentTime, Math.max(duration, 1))} onChange={(event) => seekTo(Number(event.target.value))}/><button className="speed">1.0×</button></div></div>
           <div className="timeline-card"><div className="timeline-head"><div><b>素材节点时间线</b><span>点击节点跳转画面</span></div><div className="node-legend">{nodeKinds.slice(0,4).map((kind) => <span key={kind} className={`kind-${kind}`}><i/>{kind}</span>)}</div></div><div className="ruler"><span>00:00</span><span>00:30</span><span>01:00</span><span>01:30</span><span>02:00</span></div><div className="timeline-track" onClick={(event) => { const rect = event.currentTarget.getBoundingClientRect(); seekTo(((event.clientX - rect.left) / rect.width) * Math.max(duration, 120)); }}><div className="waveform"/>{nodes.map((node) => <button key={node.id} aria-label={`${formatTime(node.start)} ${node.kind}节点，价值 ${node.score}`} title={node.text} className={`timeline-node kind-${node.kind} ${activeNodeId === node.id ? "active" : ""}`} style={{ left: `${Math.min((node.start / Math.max(duration, 120)) * 100, 96)}%` }} onClick={(event) => { event.stopPropagation(); setActiveNodeId(node.id); seekTo(node.start); }}><span>{node.score}</span></button>)}<i className="playhead" style={{ left: `${Math.min((currentTime / Math.max(duration, 120)) * 100, 100)}%` }}/></div><div className="timeline-foot"><span><Clock3 size={13}/>{nodes.length} 个有效节点 · 预计可压缩成 6–8 分钟</span><button onClick={() => void exportXml()}>导出 Premiere XML</button></div></div>
         </section>
 

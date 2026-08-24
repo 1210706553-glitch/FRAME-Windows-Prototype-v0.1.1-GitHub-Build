@@ -21,8 +21,7 @@ fn parse_rate(value: &str) -> Option<f64> {
     (denominator != 0.0).then_some(numerator / denominator)
 }
 
-#[tauri::command]
-pub fn probe_media(path: String) -> Result<MediaProbe, String> {
+fn probe_media_blocking(path: String) -> Result<MediaProbe, String> {
     let output = Command::new("ffprobe")
         .args(["-v", "error", "-print_format", "json", "-show_format", "-show_streams", &path])
         .output()
@@ -44,4 +43,11 @@ pub fn probe_media(path: String) -> Result<MediaProbe, String> {
         audio_tracks,
         format_name: format["format_name"].as_str().map(str::to_string),
     })
+}
+
+#[tauri::command]
+pub async fn probe_media(path: String) -> Result<MediaProbe, String> {
+    tauri::async_runtime::spawn_blocking(move || probe_media_blocking(path))
+        .await
+        .map_err(|error| format!("读取媒体信息的后台任务失败：{error}"))?
 }

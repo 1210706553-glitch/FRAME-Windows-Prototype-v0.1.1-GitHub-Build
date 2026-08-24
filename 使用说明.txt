@@ -1,0 +1,27 @@
+FRAME / 文场 · 视频导入黑屏修复补丁（v0.1.1）
+
+适用情况：
+- 软件能启动，但选择视频后整个内容区域变黑。
+- 大文件和小文件都会触发。
+
+覆盖方法：
+1. 关闭“视频创作工作台”和 GitHub Desktop。
+2. 打开你原来的项目文件夹：FRAME-Windows-Prototype-v0.1.1-GitHub-Build。
+3. 将本压缩包内除“使用说明.txt”外的所有文件和文件夹复制到项目根目录。
+4. Windows 提示时选择“替换目标中的文件”。
+5. 打开 GitHub Desktop，确认出现 7 个左右的修改文件。
+6. Summary 填：Fix video import black screen
+7. 点击 Commit to main，再点击 Push origin。
+8. 等 GitHub Actions 出现绿色对勾，下载新的 FRAME-Windows-EXE。
+9. 解压构建产物并运行“视频创作工作台_0.1.1_x64-setup.exe”。
+
+本补丁的修复：
+- 视频信息读取移到后台线程，避免 FFprobe 阻塞界面。
+- 选完文件后先完成安全检查，再挂载播放器。
+- 允许读取用户主动选择的其他磁盘和文件夹。
+- 预览失败时显示错误卡片，不再让整个界面进入黑屏。
+- 保留只构建 NSIS EXE 的 GitHub Actions 设置。
+
+注意：
+- 这是稳定性修复，不会删除项目数据。
+- 安装新版本前可以直接保留旧版本；安装程序会覆盖升级。
