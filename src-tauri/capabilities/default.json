@@ -7,11 +7,9 @@
   ],
   "permissions": [
     "core:default",
-    "dialog:allow-open",
-    "dialog:allow-save",
-    "fs:allow-read-file",
-    "fs:allow-read-dir",
-    "fs:allow-exists",
-    "fs:allow-stat"
+    "notification:default",
+    "autostart:allow-enable",
+    "autostart:allow-disable",
+    "autostart:allow-is-enabled"
   ]
 }

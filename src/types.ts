@@ -1,56 +1,77 @@
-export type ProjectStage = "素材整理" | "方向发散" | "主线设计" | "大纲" | "脚本" | "审阅";
+export const CREATION_STAGES = [
+  "素材梳理",
+  "粗剪",
+  "大纲",
+  "脚本与配音",
+  "精剪与包装",
+  "标题封面与发布",
+  "数据复盘",
+] as const;
 
-export type Project = {
+export type CreationStage = (typeof CREATION_STAGES)[number];
+export type TaskStatus = "todo" | "doing" | "done";
+export type FocusStatus = "idle" | "active" | "temporary-unlock";
+
+export interface CreationTask {
+  id: string;
+  title: string;
+  note?: string;
+  stage: CreationStage;
+  estimateMinutes: number;
+  weight: number;
+  status: TaskStatus;
+  plannedDate: string;
+  createdAt: string;
+  completedAt?: string;
+}
+
+export interface ProjectPlan {
   id: string;
   name: string;
   game: string;
-  stage: ProjectStage;
-  updatedAt: string;
-  mediaCount: number;
-};
+  primaryPlatform: "B站" | "抖音" | "小红书" | "快手" | "其他";
+  secondaryPlatform?: string;
+  startDate: string;
+  targetDate: string;
+  createdAt: string;
+  tasks: CreationTask[];
+}
 
-export type MediaItem = {
-  id: string;
-  projectId: string;
-  name: string;
-  path: string;
-  previewUrl: string;
-  duration: number;
-  width?: number;
-  height?: number;
-  fps?: number;
-  size?: number;
-  status: "ready" | "probing" | "transcribing" | "error";
-};
+export interface UserPreferences {
+  displayName: string;
+  dailyStartTime: string;
+  dailyMinutes: number;
+  restWeekday: number;
+  reminderEnabled: boolean;
+  launchAtStartup: boolean;
+  distractionApps: string[];
+  distractionSites: string[];
+}
 
-export type MaterialNodeKind = "笑点" | "信息" | "情绪" | "过场" | "删除候选";
+export interface FocusSession {
+  status: FocusStatus;
+  taskId?: string;
+  startedAt?: string;
+  durationMinutes?: number;
+  unlockUntil?: string;
+  unlockReason?: string;
+}
 
-export type MaterialNode = {
-  id: string;
-  mediaId: string;
-  start: number;
-  end: number;
-  text: string;
-  kind: MaterialNodeKind;
-  score: number;
-  source: "人工" | "本地转写" | "AI分析";
-};
+export interface DailyRecord {
+  date: string;
+  focusedMinutes: number;
+  completedTaskIds: string[];
+  unavailableReason?: string;
+  usedDynamicRestDay?: boolean;
+  absence?: boolean;
+}
 
-export type MediaProbe = {
-  duration: number;
-  width?: number;
-  height?: number;
-  fps?: number;
-  size?: number;
-  audioTracks: number;
-  formatName?: string;
-};
+export interface AppState {
+  schemaVersion: 2;
+  project: ProjectPlan | null;
+  preferences: UserPreferences;
+  focus: FocusSession;
+  records: DailyRecord[];
+}
 
-export type AppSettings = {
-  provider: "openai" | "compatible";
-  baseUrl: string;
-  model: string;
-  hasApiKey: boolean;
-  transcriptionModel: "small" | "medium" | "large-v3-turbo";
-  transcriptionDevice: "auto" | "cuda" | "cpu";
-};
+export type AppView = "today" | "plan" | "focus" | "review";

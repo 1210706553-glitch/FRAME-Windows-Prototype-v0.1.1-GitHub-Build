@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-    frame_video_workbench_lib::run();
+    mickey_toolkit_lib::run();
 }

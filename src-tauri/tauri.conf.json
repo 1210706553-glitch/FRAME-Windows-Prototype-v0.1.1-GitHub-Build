@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "视频创作工作台",
-  "version": "0.1.1",
+  "productName": "张诗语の米奇妙妙工具",
+  "version": "0.3.0",
   "identifier": "com.sunday.frame",
   "build": {
     "frontendDist": "../dist",
@@ -12,25 +12,20 @@
   "app": {
     "windows": [
       {
-        "title": "视频创作工作台",
+        "title": "张诗语の米奇妙妙工具",
         "width": 1480,
         "height": 920,
         "minWidth": 1080,
         "minHeight": 720,
         "center": true,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "devtools": false,
+        "dataDirectory": "mickey-toolkit"
       }
     ],
     "security": {
-      "csp": "default-src 'self' asset: http://asset.localhost; img-src 'self' asset: http://asset.localhost blob: data:; media-src 'self' asset: http://asset.localhost blob: data:; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost https://api.openai.com",
-      "assetProtocol": {
-        "enable": true,
-        "scope": {
-          "requireLiteralLeadingDot": true,
-          "allow": ["**/*"]
-        }
-      }
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'"
     }
   },
   "bundle": {
